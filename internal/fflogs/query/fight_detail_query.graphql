@@ -1,0 +1,16 @@
+query GetFightRecord($code: String!, $fightID: Int!) {
+  reportData {
+    report(code: $code) {
+      zone { id }
+      startTime
+      fights(fightIDs: [$fightID]) {
+        encounterID
+        startTime
+        endTime
+        kill
+        bossPercentage
+      }
+      table(fightIDs: [$fightID], dataType: Summary)
+    }
+  }
+}
