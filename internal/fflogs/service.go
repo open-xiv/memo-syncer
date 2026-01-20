@@ -34,8 +34,8 @@ func (s *Service) GetBestCleanByZone(ctx context.Context, name, server string, z
 	if err != nil {
 		return nil, err
 	}
-	reportCode := fights.Data.CharacterData.Character.EncounterRankings.Ranks[0].Report.Code
-	fightId := fights.Data.CharacterData.Character.EncounterRankings.Ranks[0].Report.FightID
+	reportCode := fights.CharacterData.Character.EncounterRankings.Ranks[0].Report.Code
+	fightId := fights.CharacterData.Character.EncounterRankings.Ranks[0].Report.FightID
 
 	detail, err := s.client.FetchFightDetail(ctx, reportCode, fightId)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *Service) GetBestCleanByZone(ctx context.Context, name, server string, z
 
 func getPlayerServerMap(fight FightDetail) map[string]string {
 	nameToServer := make(map[string]string)
-	actors := fight.Data.ReportData.Report.MasterData.Actors
+	actors := fight.ReportData.Report.MasterData.Actors
 
 	for _, actor := range actors {
 		if actor.Server != nil {
@@ -61,7 +61,7 @@ func getPlayerServerMap(fight FightDetail) map[string]string {
 func CountDeathsByName(fight FightDetail) map[string]int {
 	deathCounts := make(map[string]int)
 
-	deaths := fight.Data.ReportData.Report.Table.Data.DeathEvents
+	deaths := fight.ReportData.Report.Table.Data.DeathEvents
 
 	for _, event := range deaths {
 		deathCounts[event.Name]++
@@ -73,7 +73,7 @@ func CountDeathsByName(fight FightDetail) map[string]int {
 func (j *Jobs) mapSlugToID() map[string]int {
 	slugMap := make(map[string]int)
 
-	for _, class := range j.Data.GameData.Classes {
+	for _, class := range j.GameData.Classes {
 		for _, spec := range class.Specs {
 			slugMap[spec.Slug] = spec.Id
 		}
@@ -82,7 +82,7 @@ func (j *Jobs) mapSlugToID() map[string]int {
 }
 
 func (s *Service) mapToMemo(detail FightDetail) *memo.FightRecordPayload {
-	var report = detail.Data.ReportData.Report
+	var report = detail.ReportData.Report
 
 	var absoluteStartTimestamp = report.StartTime + report.Fights[0].StartTime
 	var absoluteStartTime = time.UnixMilli(int64(absoluteStartTimestamp))

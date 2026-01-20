@@ -49,13 +49,13 @@ func (c *Client) FetchCharacterID(ctx context.Context, name, server, region stri
 
 	err := c.do(ctx, characterIDQuery, vars, &res)
 
-	return res.Data.CharacterData.Character.Id, err
+	return res.CharacterData.Character.Id, err
 }
 
 func (c *Client) FetchBestFightByEncounter(ctx context.Context, id, encounter int) (*EncounterRanked, error) {
 	vars := map[string]any{
-		"encounter": encounter,
-		"id":        id,
+		"encounterID": encounter,
+		"charID":      id,
 	}
 	var res EncounterRanked
 
@@ -66,8 +66,8 @@ func (c *Client) FetchBestFightByEncounter(ctx context.Context, id, encounter in
 
 func (c *Client) FetchFightDetail(ctx context.Context, report string, fight int) (*FightDetail, error) {
 	vars := map[string]any{
-		"report": report,
-		"fight":  fight,
+		"code":    report,
+		"fightID": fight,
 	}
 	var res FightDetail
 
