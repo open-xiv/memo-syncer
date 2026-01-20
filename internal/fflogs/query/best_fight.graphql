@@ -1,8 +1,8 @@
 query GetEncounterReports($charID: Int!, $encounterID: Int!) {
-  characterData {
-    character(id: $charID) {
-      name
-      encounterRankings(encounterID: $encounterID, metric: default)
+    characterData {
+        character(id: $charID) {
+            name
+            encounterRankings(encounterID: $encounterID, metric: default)
+        }
     }
-  }
 }
