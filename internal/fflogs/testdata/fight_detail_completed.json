@@ -1,0 +1,615 @@
+{
+  "reportData": {
+    "report": {
+      "zone": {
+        "id": 73
+      },
+      "startTime": 1767707219706,
+      "masterData": {
+        "actors": [
+          {
+            "id": 1,
+            "name": "狂妄",
+            "server": null
+          },
+          {
+            "id": 2,
+            "name": "狂妄",
+            "server": "晨曦王座"
+          },
+          {
+            "id": 3,
+            "name": "奥尔什方",
+            "server": "沃仙曦染"
+          },
+          {
+            "id": 4,
+            "name": "克里斯卿",
+            "server": "萌芽池"
+          },
+          {
+            "id": 5,
+            "name": "莱欧斯丶",
+            "server": "龙巢神殿"
+          },
+          {
+            "id": 6,
+            "name": "残星star",
+            "server": "伊修加德"
+          },
+          {
+            "id": 7,
+            "name": "光之战士'",
+            "server": "沃仙曦染"
+          },
+          {
+            "id": 8,
+            "name": "次酱",
+            "server": "红玉海"
+          },
+          {
+            "id": 9,
+            "name": "天顶之鯹",
+            "server": "晨曦王座"
+          },
+          {
+            "id": 10,
+            "name": "Multiple Players",
+            "server": null
+          },
+          {
+            "id": 29,
+            "name": "Limit Break",
+            "server": null
+          },
+          {
+            "id": 30,
+            "name": "北芪",
+            "server": "白金幻象"
+          },
+          {
+            "id": 31,
+            "name": "喵喵喵杍",
+            "server": "沃仙曦染"
+          },
+          {
+            "id": 32,
+            "name": "鱼里昂热",
+            "server": "拉诺西亚"
+          },
+          {
+            "id": 33,
+            "name": "棉被流星",
+            "server": "白金幻象"
+          },
+          {
+            "id": 34,
+            "name": "废柴眼镜",
+            "server": "神意之地"
+          }
+        ]
+      },
+      "fights": [
+        {
+          "encounterID": 101,
+          "startTime": 5734224,
+          "endTime": 6320790,
+          "kill": true,
+          "bossPercentage": 0.01
+        }
+      ],
+      "table": {
+        "data": {
+          "totalTime": 586566,
+          "itemLevel": 0,
+          "combatTime": 586566,
+          "composition": [
+            {
+              "name": "北芪",
+              "id": 30,
+              "guid": 1000030,
+              "type": "Warrior",
+              "specs": [
+                {
+                  "spec": "tank",
+                  "role": "tank"
+                }
+              ]
+            },
+            {
+              "name": "狂妄",
+              "id": 2,
+              "guid": 1000002,
+              "type": "Machinist",
+              "specs": [
+                {
+                  "spec": "dps",
+                  "role": "dps"
+                }
+              ]
+            },
+            {
+              "name": "鱼里昂热",
+              "id": 32,
+              "guid": 1000032,
+              "type": "Paladin",
+              "specs": [
+                {
+                  "spec": "tank",
+                  "role": "tank"
+                }
+              ]
+            },
+            {
+              "name": "废柴眼镜",
+              "id": 34,
+              "guid": 1000034,
+              "type": "Viper",
+              "specs": [
+                {
+                  "spec": "dps",
+                  "role": "dps"
+                }
+              ]
+            },
+            {
+              "name": "天顶之鯹",
+              "id": 9,
+              "guid": 1000009,
+              "type": "Monk",
+              "specs": [
+                {
+                  "spec": "dps",
+                  "role": "dps"
+                }
+              ]
+            },
+            {
+              "name": "克里斯卿",
+              "id": 4,
+              "guid": 1000004,
+              "type": "WhiteMage",
+              "specs": [
+                {
+                  "spec": "healer",
+                  "role": "healer"
+                }
+              ]
+            },
+            {
+              "name": "喵喵喵杍",
+              "id": 31,
+              "guid": 1000031,
+              "type": "BlackMage",
+              "specs": [
+                {
+                  "spec": "dps",
+                  "role": "dps"
+                }
+              ]
+            },
+            {
+              "name": "次酱",
+              "id": 8,
+              "guid": 1000008,
+              "type": "Sage",
+              "specs": [
+                {
+                  "spec": "healer",
+                  "role": "healer"
+                }
+              ]
+            }
+          ],
+          "damageDone": [
+            {
+              "name": "北芪",
+              "id": 30,
+              "guid": 1000030,
+              "type": "Warrior",
+              "icon": "Warrior",
+              "total": 13240346
+            },
+            {
+              "name": "狂妄",
+              "id": 2,
+              "guid": 1000002,
+              "type": "Machinist",
+              "icon": "Machinist",
+              "total": 20721908
+            },
+            {
+              "name": "鱼里昂热",
+              "id": 32,
+              "guid": 1000032,
+              "type": "Paladin",
+              "icon": "Paladin",
+              "total": 12796977
+            },
+            {
+              "name": "废柴眼镜",
+              "id": 34,
+              "guid": 1000034,
+              "type": "Viper",
+              "icon": "Viper",
+              "total": 19516373
+            },
+            {
+              "name": "天顶之鯹",
+              "id": 9,
+              "guid": 1000009,
+              "type": "Monk",
+              "icon": "Monk",
+              "total": 17732644
+            },
+            {
+              "name": "Limit Break",
+              "id": 29,
+              "guid": 1000029,
+              "type": "LimitBreak",
+              "icon": "LimitBreak",
+              "total": 1387849
+            },
+            {
+              "name": "克里斯卿",
+              "id": 4,
+              "guid": 1000004,
+              "type": "WhiteMage",
+              "icon": "WhiteMage",
+              "total": 10152862
+            },
+            {
+              "name": "喵喵喵杍",
+              "id": 31,
+              "guid": 1000031,
+              "type": "BlackMage",
+              "icon": "BlackMage",
+              "total": 22188732
+            },
+            {
+              "name": "次酱",
+              "id": 8,
+              "guid": 1000008,
+              "type": "Sage",
+              "icon": "Sage",
+              "total": 10404202
+            }
+          ],
+          "healingDone": [
+            {
+              "name": "北芪",
+              "id": 30,
+              "guid": 1000030,
+              "type": "Warrior",
+              "icon": "Warrior",
+              "total": 3227643
+            },
+            {
+              "name": "狂妄",
+              "id": 2,
+              "guid": 1000002,
+              "type": "Machinist",
+              "icon": "Machinist",
+              "total": 170293
+            },
+            {
+              "name": "废柴眼镜",
+              "id": 34,
+              "guid": 1000034,
+              "type": "Viper",
+              "icon": "Viper",
+              "total": 152620
+            },
+            {
+              "name": "鱼里昂热",
+              "id": 32,
+              "guid": 1000032,
+              "type": "Paladin",
+              "icon": "Paladin",
+              "total": 2647540
+            },
+            {
+              "name": "天顶之鯹",
+              "id": 9,
+              "guid": 1000009,
+              "type": "Monk",
+              "icon": "Monk",
+              "total": 326423
+            },
+            {
+              "name": "克里斯卿",
+              "id": 4,
+              "guid": 1000004,
+              "type": "WhiteMage",
+              "icon": "WhiteMage",
+              "total": 8602228
+            },
+            {
+              "name": "喵喵喵杍",
+              "id": 31,
+              "guid": 1000031,
+              "type": "BlackMage",
+              "icon": "BlackMage",
+              "total": 141825
+            },
+            {
+              "name": "次酱",
+              "id": 8,
+              "guid": 1000008,
+              "type": "Sage",
+              "icon": "Sage",
+              "total": 17418064
+            }
+          ],
+          "damageTaken": [
+            {
+              "name": "Sadistic Screech",
+              "guid": 45926,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 3978597
+            },
+            {
+              "name": "Blast Beat",
+              "guid": 45942,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 3063954
+            },
+            {
+              "name": "Bloody Bondage",
+              "guid": 45974,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 49134
+            },
+            {
+              "name": "Brutal Rain",
+              "guid": 45955,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 4302576
+            },
+            {
+              "name": "Electrocution",
+              "guid": 1003074,
+              "type": 1,
+              "abilityIcon": "215000-215528.png",
+              "total": 403518
+            },
+            {
+              "name": "Attack",
+              "guid": 48039,
+              "type": 128,
+              "abilityIcon": "000000-000101.png",
+              "total": 1949549
+            },
+            {
+              "name": "Flesh Wound",
+              "guid": 1002942,
+              "type": 1,
+              "abilityIcon": "215000-215521.png",
+              "total": 941461
+            },
+            {
+              "name": "Breakwing Beat",
+              "guid": 45993,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 148282
+            },
+            {
+              "name": "Ultrasonic Spread",
+              "guid": 47235,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 322922
+            },
+            {
+              "name": "Electrocution",
+              "guid": 1003073,
+              "type": 1,
+              "abilityIcon": "215000-215528.png",
+              "total": 83758
+            },
+            {
+              "name": "Blood Lash",
+              "guid": 45979,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 571190
+            },
+            {
+              "name": "Finale Fatale",
+              "guid": 45936,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 1321666
+            },
+            {
+              "name": "Gravegrazer",
+              "guid": 45932,
+              "type": 128,
+              "abilityIcon": "000000-000405.png",
+              "total": 135484
+            },
+            {
+              "name": "Blood Lash",
+              "guid": 45977,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 353906
+            },
+            {
+              "name": "Sanguine Scratch",
+              "guid": 45991,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 201495
+            },
+            {
+              "name": "Plummet",
+              "guid": 45963,
+              "type": 128,
+              "abilityIcon": "000000-000405.png",
+              "total": 610971
+            },
+            {
+              "name": "Ultrasonic Spread",
+              "guid": 45982,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 676166
+            },
+            {
+              "name": "Aetherletting",
+              "guid": 45970,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 850764
+            },
+            {
+              "name": "Hardcore",
+              "guid": 45952,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 298368
+            },
+            {
+              "name": "Crowd Kill",
+              "guid": 45933,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 3377456
+            },
+            {
+              "name": "Ultrasonic Amp",
+              "guid": 45983,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 868866
+            },
+            {
+              "name": "Hardcore",
+              "guid": 45951,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 546424
+            },
+            {
+              "name": "Aetherletting",
+              "guid": 45969,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 147115
+            },
+            {
+              "name": "Bloody Bondage",
+              "guid": 45985,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 979485
+            },
+            {
+              "name": "Finale Fatale",
+              "guid": 45935,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 825465
+            },
+            {
+              "name": "Blood Lash",
+              "guid": 45978,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 185046
+            },
+            {
+              "name": "Attack",
+              "guid": 47048,
+              "type": 1024,
+              "abilityIcon": "000000-000101.png",
+              "total": 2341752
+            },
+            {
+              "name": "Killer Voice",
+              "guid": 45956,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 2971953
+            },
+            {
+              "name": "Insatiable Thirst",
+              "guid": 45938,
+              "type": 1024,
+              "abilityIcon": "000000-000405.png",
+              "total": 1373981
+            }
+          ],
+          "deathEvents": [
+            {
+              "name": "天顶之鯹",
+              "id": 9,
+              "guid": 1000009,
+              "type": "Monk",
+              "icon": "Monk",
+              "deathTime": 199388,
+              "ability": {
+                "name": "Aetherletting",
+                "guid": 45970,
+                "type": 1024,
+                "abilityIcon": "000000-000405.png"
+              }
+            },
+            {
+              "name": "天顶之鯹",
+              "id": 9,
+              "guid": 1000009,
+              "type": "Monk",
+              "icon": "Monk",
+              "deathTime": 199388,
+              "ability": {
+                "name": "Aetherletting",
+                "guid": 45970,
+                "type": 1024,
+                "abilityIcon": "000000-000405.png"
+              }
+            },
+            {
+              "name": "鱼里昂热",
+              "id": 32,
+              "guid": 1000032,
+              "type": "Paladin",
+              "icon": "Paladin",
+              "deathTime": 239573,
+              "ability": {
+                "name": "Blast Beat",
+                "guid": 45942,
+                "type": 1024,
+                "abilityIcon": "000000-000405.png"
+              }
+            },
+            {
+              "name": "废柴眼镜",
+              "id": 34,
+              "guid": 1000034,
+              "type": "Viper",
+              "icon": "Viper",
+              "deathTime": 239617,
+              "ability": {
+                "name": "Blast Beat",
+                "guid": 45942,
+                "type": 1024,
+                "abilityIcon": "000000-000405.png"
+              }
+            }
+          ],
+          "exploitDetails": [],
+          "logVersion": 72,
+          "gameVersion": 1,
+          "logFileDetails": "DEUCALION=1.4.0,FFXIV_ACT_Plugin=2.7.5.0,GAME_VERSION=2025.12.23.0000.0000,OK=1"
+        }
+      }
+    }
+  }
+}
