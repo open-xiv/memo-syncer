@@ -1,0 +1,117 @@
+{
+  "gameData": {
+    "classes": [
+      {
+        "id": 1,
+        "name": "Global",
+        "specs": [
+          {
+            "id": 1,
+            "name": "Astrologian",
+            "slug": "Astrologian"
+          },
+          {
+            "id": 2,
+            "name": "Bard",
+            "slug": "Bard"
+          },
+          {
+            "id": 3,
+            "name": "Black Mage",
+            "slug": "BlackMage"
+          },
+          {
+            "id": 4,
+            "name": "Dark Knight",
+            "slug": "DarkKnight"
+          },
+          {
+            "id": 5,
+            "name": "Dragoon",
+            "slug": "Dragoon"
+          },
+          {
+            "id": 6,
+            "name": "Machinist",
+            "slug": "Machinist"
+          },
+          {
+            "id": 7,
+            "name": "Monk",
+            "slug": "Monk"
+          },
+          {
+            "id": 8,
+            "name": "Ninja",
+            "slug": "Ninja"
+          },
+          {
+            "id": 9,
+            "name": "Paladin",
+            "slug": "Paladin"
+          },
+          {
+            "id": 10,
+            "name": "Scholar",
+            "slug": "Scholar"
+          },
+          {
+            "id": 11,
+            "name": "Summoner",
+            "slug": "Summoner"
+          },
+          {
+            "id": 12,
+            "name": "Warrior",
+            "slug": "Warrior"
+          },
+          {
+            "id": 13,
+            "name": "White Mage",
+            "slug": "WhiteMage"
+          },
+          {
+            "id": 14,
+            "name": "Red Mage",
+            "slug": "RedMage"
+          },
+          {
+            "id": 15,
+            "name": "Samurai",
+            "slug": "Samurai"
+          },
+          {
+            "id": 16,
+            "name": "Dancer",
+            "slug": "Dancer"
+          },
+          {
+            "id": 17,
+            "name": "Gunbreaker",
+            "slug": "Gunbreaker"
+          },
+          {
+            "id": 18,
+            "name": "Reaper",
+            "slug": "Reaper"
+          },
+          {
+            "id": 19,
+            "name": "Sage",
+            "slug": "Sage"
+          },
+          {
+            "id": 20,
+            "name": "Viper",
+            "slug": "Viper"
+          },
+          {
+            "id": 21,
+            "name": "Pictomancer",
+            "slug": "Pictomancer"
+          }
+        ]
+      }
+    ]
+  }
+}

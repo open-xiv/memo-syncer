@@ -1,6 +1,11 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/spf13/viper"
+)
 
 func LoadConfig() (*Config, error) {
 	v := viper.New()
@@ -13,7 +18,10 @@ func LoadConfig() (*Config, error) {
 	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {
-		return nil, err
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if !errors.As(err, &configFileNotFoundError) {
+			return nil, err
+		}
 	}
 
 	v.SetDefault("client_id", "")
@@ -21,6 +29,10 @@ func LoadConfig() (*Config, error) {
 
 	var cfg Config
 	err := v.Unmarshal(&cfg)
+
+	if cfg.ClientID == "" || cfg.ClientSecret == "" {
+		return nil, fmt.Errorf("missing client id or secret")
+	}
 
 	return &cfg, err
 }

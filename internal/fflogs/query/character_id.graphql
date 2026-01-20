@@ -1,7 +1,7 @@
 query GetCharacterID($name: String!, $server: String!, $region: String!) {
-  characterData {
-    character(name: $name, serverSlug: $server, serverRegion: $region) {
-      id
+    characterData {
+        character(name: $name, serverSlug: $server, serverRegion: $region) {
+            id
+        }
     }
-  }
 }

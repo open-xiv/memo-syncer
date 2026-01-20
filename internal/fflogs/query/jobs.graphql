@@ -1,13 +1,13 @@
 query getAllJobs {
-  gameData {
-    classes {
-      id
-      name
-      specs {
-        id
-        name
-        slug
-      }
+    gameData {
+        classes {
+            id
+            name
+            specs {
+                id
+                name
+                slug
+            }
+        }
     }
-  }
 }

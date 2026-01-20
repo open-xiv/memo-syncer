@@ -1,23 +1,23 @@
 query GetFightRecord($code: String!, $fightID: Int!) {
-  reportData {
-    report(code: $code) {
-      zone { id }
-      startTime
-      masterData {
-        actors(type: "Player") {
-          id
-          name
-          server
+    reportData {
+        report(code: $code) {
+            zone { id }
+            startTime
+            masterData {
+                actors(type: "Player") {
+                    id
+                    name
+                    server
+                }
+            }
+            fights(fightIDs: [$fightID]) {
+                encounterID
+                startTime
+                endTime
+                kill
+                bossPercentage
+            }
+            table(fightIDs: [$fightID], dataType: Summary)
         }
-      }
-      fights(fightIDs: [$fightID]) {
-        encounterID
-        startTime
-        endTime
-        kill
-        bossPercentage
-      }
-      table(fightIDs: [$fightID], dataType: Summary)
     }
-  }
 }
