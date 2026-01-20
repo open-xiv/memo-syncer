@@ -59,8 +59,15 @@ type FightDetail struct {
 				Zone struct {
 					Id int `json:"id"`
 				} `json:"zone"`
-				StartTime int `json:"startTime"`
-				Fights    []struct {
+				StartTime  int `json:"startTime"`
+				MasterData struct {
+					Actors []struct {
+						Id     int     `json:"id"`
+						Name   string  `json:"name"`
+						Server *string `json:"server"`
+					} `json:"actors"`
+				} `json:"masterData"`
+				Fights []struct {
 					EncounterID    int     `json:"encounterID"`
 					StartTime      int     `json:"startTime"`
 					EndTime        int     `json:"endTime"`
@@ -89,5 +96,21 @@ type FightDetail struct {
 				} `json:"table"`
 			} `json:"report"`
 		} `json:"reportData"`
+	} `json:"data"`
+}
+
+type Jobs struct {
+	Data struct {
+		GameData struct {
+			Classes []struct {
+				Id    int    `json:"id"`
+				Name  string `json:"name"`
+				Specs []struct {
+					Id   int    `json:"id"`
+					Name string `json:"name"`
+					Slug string `json:"slug"`
+				} `json:"specs"`
+			} `json:"classes"`
+		} `json:"gameData"`
 	} `json:"data"`
 }

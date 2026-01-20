@@ -3,6 +3,13 @@ query GetFightRecord($code: String!, $fightID: Int!) {
     report(code: $code) {
       zone { id }
       startTime
+      masterData {
+        actors(type: "Player") {
+          id
+          name
+          server
+        }
+      }
       fights(fightIDs: [$fightID]) {
         encounterID
         startTime

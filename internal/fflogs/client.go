@@ -30,7 +30,7 @@ func NewClient(clientID, clientSecret string) *Client {
 	}
 }
 
-func (c *Client) do(ctx context.Context, query string, vars map[string]interface{}, res interface{}) error {
+func (c *Client) do(ctx context.Context, query string, vars map[string]any, res any) error {
 	req := graphql.NewRequest(query)
 	for k, v := range vars {
 		req.Var(k, v)
@@ -40,7 +40,7 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]interface
 }
 
 func (c *Client) FetchCharacterID(ctx context.Context, name, server, region string) (int, error) {
-	vars := map[string]interface{}{
+	vars := map[string]any{
 		"server": server,
 		"name":   name,
 		"region": region,
@@ -52,8 +52,8 @@ func (c *Client) FetchCharacterID(ctx context.Context, name, server, region stri
 	return res.Data.CharacterData.Character.Id, err
 }
 
-func (c *Client) FetchBestFightByEncounter(ctx context.Context, id, encounter int) (EncounterRanked, error) {
-	vars := map[string]interface{}{
+func (c *Client) FetchBestFightByEncounter(ctx context.Context, id, encounter int) (*EncounterRanked, error) {
+	vars := map[string]any{
 		"encounter": encounter,
 		"id":        id,
 	}
@@ -61,11 +61,11 @@ func (c *Client) FetchBestFightByEncounter(ctx context.Context, id, encounter in
 
 	err := c.do(ctx, bestFightQuery, vars, &res)
 
-	return res, err
+	return &res, err
 }
 
-func (c *Client) FetchFightDetail(ctx context.Context, report string, fight int) (FightDetail, error) {
-	vars := map[string]interface{}{
+func (c *Client) FetchFightDetail(ctx context.Context, report string, fight int) (*FightDetail, error) {
+	vars := map[string]any{
 		"report": report,
 		"fight":  fight,
 	}
@@ -73,5 +73,13 @@ func (c *Client) FetchFightDetail(ctx context.Context, report string, fight int)
 
 	err := c.do(ctx, fightDetailQuery, vars, &res)
 
-	return res, err
+	return &res, err
+}
+
+func (c *Client) FetchJobs(ctx context.Context) (*Jobs, error) {
+	var res Jobs
+
+	err := c.do(ctx, jobsQuery, nil, &res)
+
+	return &res, err
 }

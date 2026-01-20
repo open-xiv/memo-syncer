@@ -8,10 +8,20 @@ import (
 
 type Service struct {
 	client *Client
+	jobs   *Jobs
 }
 
 func NewService(client *Client) *Service {
 	return &Service{client: client}
+}
+
+func (s *Service) Init(ctx context.Context) error {
+	jobs, err := s.client.FetchJobs(ctx)
+	if err != nil {
+		return err
+	}
+	s.jobs = jobs
+	return nil
 }
 
 func (s *Service) GetBestCleanByZone(ctx context.Context, name, server string, zone int) (*memo.FightRecordPayload, error) {
@@ -32,7 +42,43 @@ func (s *Service) GetBestCleanByZone(ctx context.Context, name, server string, z
 		return nil, err
 	}
 
-	return s.mapToMemo(detail), nil
+	return s.mapToMemo(*detail), nil
+}
+
+func getPlayerServerMap(fight FightDetail) map[string]string {
+	nameToServer := make(map[string]string)
+	actors := fight.Data.ReportData.Report.MasterData.Actors
+
+	for _, actor := range actors {
+		if actor.Server != nil {
+			nameToServer[actor.Name] = *actor.Server
+		}
+	}
+
+	return nameToServer
+}
+
+func CountDeathsByName(fight FightDetail) map[string]int {
+	deathCounts := make(map[string]int)
+
+	deaths := fight.Data.ReportData.Report.Table.Data.DeathEvents
+
+	for _, event := range deaths {
+		deathCounts[event.Name]++
+	}
+
+	return deathCounts
+}
+
+func (j *Jobs) mapSlugToID() map[string]int {
+	slugMap := make(map[string]int)
+
+	for _, class := range j.Data.GameData.Classes {
+		for _, spec := range class.Specs {
+			slugMap[spec.Slug] = spec.Id
+		}
+	}
+	return slugMap
 }
 
 func (s *Service) mapToMemo(detail FightDetail) *memo.FightRecordPayload {
@@ -45,19 +91,23 @@ func (s *Service) mapToMemo(detail FightDetail) *memo.FightRecordPayload {
 	var zone = uint32(report.Zone.Id)
 	var isKill = report.Fights[0].Kill
 
+	// Construct player payloads
 	var playerPayloads []memo.PlayerPayload
-	// TODO: query server, jobId, level, and count the death amount
-	for i := 0; i < len(report.Table.Data.Composition); i++ {
-		var player = report.Table.Data.Composition[i]
+
+	jobMap := s.jobs.mapSlugToID()
+	serverMap := getPlayerServerMap(detail)
+	deathMap := CountDeathsByName(detail)
+	for _, player := range report.Table.Data.Composition {
 		playerPayloads = append(playerPayloads, memo.PlayerPayload{
 			Name:       player.Name,
-			Server:     "",
-			JobID:      0,
-			Level:      0,
-			DeathCount: 0,
+			Server:     serverMap[player.Name],
+			JobID:      uint32(jobMap[player.Type]),
+			Level:      100,
+			DeathCount: uint32(deathMap[player.Name]),
 		})
 	}
 
+	// Construct progress payloads
 	var enemyHP = report.Fights[0].BossPercentage
 	if isKill {
 		enemyHP = 0
