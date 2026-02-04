@@ -5,7 +5,9 @@ import (
 	"memo-syncer/flow"
 	"memo-syncer/model"
 	"memo-syncer/service/fflogs"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rs/zerolog/log"
 )
@@ -63,6 +65,11 @@ func SyncMembers() error {
 				continue
 			}
 
+			// skip non-chinese servers
+			if IsEnServer(member.Server) {
+				continue
+			}
+
 			// sync zone
 			if err := SyncMemberZones(member); err != nil {
 				log.Error().Err(err).Msgf("sync member %s@%s failed", member.Name, member.Server)
@@ -81,6 +88,15 @@ func SyncMembers() error {
 	return nil
 }
 
+func IsEnServer(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
+}
+
 func SyncMemberZones(member model.Member) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -89,6 +105,12 @@ func SyncMemberZones(member model.Member) error {
 		// query from fflogs
 		fight, err := fflogs.GetMemberZoneBestProgress(ctx, member.Name, member.Server, zonePair.LogsID)
 		if err != nil {
+			// 429 too many requests -> sleep for 1 hour
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "404") {
+				log.Warn().Err(err).Msgf("sync member %s@%s [zone: %d] failed: likely rate limited, sleeping for 1 hour", member.Name, member.Server, zonePair.ZoneID)
+				time.Sleep(30 * time.Minute)
+			}
 			log.Error().Err(err).Msgf("sync member %s@%s [zone: %d] failed: fetch", member.Name, member.Server, zonePair.ZoneID)
 			time.Sleep(300 * time.Millisecond)
 			continue
