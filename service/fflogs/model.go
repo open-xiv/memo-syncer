@@ -14,8 +14,8 @@ type EncounterRanked struct {
 			Name              string `json:"name"`
 			EncounterRankings struct {
 				BestAmount         float64 `json:"bestAmount"`
-				MedianPerformance  string  `json:"medianPerformance"`
-				AveragePerformance string  `json:"averagePerformance"`
+				MedianPerformance  float64 `json:"medianPerformance"`
+				AveragePerformance float64 `json:"averagePerformance"`
 				TotalKills         int     `json:"totalKills"`
 				FastestKill        int     `json:"fastestKill"`
 				Difficulty         int     `json:"difficulty"`
@@ -23,13 +23,13 @@ type EncounterRanked struct {
 				Partition          int     `json:"partition"`
 				Zone               int     `json:"zone"`
 				Ranks              []struct {
-					LockedIn              bool   `json:"lockedIn"`
-					RankPercent           string `json:"rankPercent"`
-					HistoricalPercent     string `json:"historicalPercent"`
-					TodayPercent          string `json:"todayPercent"`
-					RankTotalParses       int    `json:"rankTotalParses"`
-					HistoricalTotalParses int    `json:"historicalTotalParses"`
-					TodayTotalParses      int    `json:"todayTotalParses"`
+					LockedIn              bool    `json:"lockedIn"`
+					RankPercent           float64 `json:"rankPercent"`
+					HistoricalPercent     float64 `json:"historicalPercent"`
+					TodayPercent          float64 `json:"todayPercent"`
+					RankTotalParses       int     `json:"rankTotalParses"`
+					HistoricalTotalParses int     `json:"historicalTotalParses"`
+					TodayTotalParses      int     `json:"todayTotalParses"`
 					Report                struct {
 						Code      string `json:"code"`
 						StartTime int64  `json:"startTime"`
