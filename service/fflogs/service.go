@@ -3,24 +3,9 @@ package fflogs
 import (
 	"context"
 	"memo-syncer/model"
+	"memo-syncer/util"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
-
-var JobMap *Jobs
-
-func InitFFLogs() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	jobs, err := FetchJobs(ctx)
-	if err != nil {
-		log.Fatal().Err(err).Msg("failed to fetch jobs")
-	}
-
-	JobMap = jobs
-}
 
 func GetMemberZoneBestProgress(ctx context.Context, name, server string, zoneID int) (*model.Fight, error) {
 	id, err := FetchCharacterID(ctx, name, server, "cn")
@@ -73,22 +58,10 @@ func GroupDeath(fight FightDetail) map[string]int {
 	return deathCounts
 }
 
-func GroupJob() map[string]int {
-	slugMap := make(map[string]int)
-
-	for _, class := range JobMap.GameData.Classes {
-		for _, spec := range class.Specs {
-			slugMap[spec.Slug] = spec.Id
-		}
-	}
-	return slugMap
-}
-
 func MapToMemo(detail FightDetail) *model.Fight {
 	var report = detail.ReportData.Report
 
 	// group map
-	jobMap := GroupJob()
 	serverMap := GroupServer(detail)
 	deathMap := GroupDeath(detail)
 
@@ -98,7 +71,7 @@ func MapToMemo(detail FightDetail) *model.Fight {
 		playerPayloads = append(playerPayloads, model.Player{
 			Name:       player.Name,
 			Server:     serverMap[player.Name],
-			JobID:      uint(jobMap[player.Type]),
+			JobID:      util.GetJobID(player.Type),
 			Level:      100,
 			DeathCount: uint(deathMap[player.Name]),
 		})

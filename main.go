@@ -4,7 +4,6 @@ import (
 	"memo-syncer/flow"
 	"memo-syncer/logger"
 	"memo-syncer/router"
-	"memo-syncer/service/fflogs"
 	"memo-syncer/service/memo"
 	"time"
 
@@ -19,9 +18,6 @@ func main() {
 	flow.InitDB()
 	flow.InitRedis()
 	flow.InitGraphQL()
-
-	// logs job map cache
-	fflogs.InitFFLogs()
 
 	// sync in background
 	go func() {
