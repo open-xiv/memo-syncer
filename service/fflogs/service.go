@@ -114,7 +114,7 @@ func MapToMemo(detail FightDetail) *model.Fight {
 	// fight
 	return &model.Fight{
 		StartTime: time.UnixMilli(int64(report.StartTime + report.Fights[0].StartTime)),
-		Duration:  time.Duration(report.Table.Data.CombatTime),
+		Duration:  time.Duration(report.Table.Data.CombatTime) * time.Millisecond,
 
 		ZoneID:  uint(report.Zone.Id),
 		Players: playerPayloads,
