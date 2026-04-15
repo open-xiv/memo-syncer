@@ -16,8 +16,10 @@ primary_region = 'nrt'
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
+  # syncer runs a long-lived background goroutine (member scan loop), so we
+  # never want the machine idle-stopped even when HTTP traffic is quiet.
+  auto_stop_machines = 'off'
+  auto_start_machines = false
   min_machines_running = 1
   processes = ['app']
 
