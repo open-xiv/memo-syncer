@@ -9,17 +9,28 @@ import (
 	"memo-syncer/model"
 	"net/http"
 	"os"
+	"sync"
 
 	"golang.org/x/net/http2"
 )
 
 const ApiURL = "https://api.sumemo.dev"
 
-func CreateFight(ctx context.Context, fight *model.Fight) error {
-	client := &http.Client{
-		Transport: &http2.Transport{},
-	}
+var (
+	httpClientOnce sync.Once
+	httpClient     *http.Client
+)
 
+func getHTTPClient() *http.Client {
+	httpClientOnce.Do(func() {
+		httpClient = &http.Client{
+			Transport: &http2.Transport{},
+		}
+	})
+	return httpClient
+}
+
+func CreateFight(ctx context.Context, fight *model.Fight) error {
 	body, err := json.Marshal(fight)
 	if err != nil {
 		return fmt.Errorf("failed to marshal fight: %w", err)
@@ -33,15 +44,12 @@ func CreateFight(ctx context.Context, fight *model.Fight) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Auth-Key", os.Getenv("MEMO_KEY"))
 
-	resp, err := client.Do(req)
+	resp, err := getHTTPClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
-		}
+		_ = Body.Close()
 	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
