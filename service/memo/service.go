@@ -36,12 +36,37 @@ var (
 	PerMemberTimeout = 60 * time.Second
 )
 
-// Progress counters exposed to the /progress handler.
+// Progress counters exposed to the /progress handler. All atomic so /progress
+// can read them without locking the scan loop.
 var (
-	Total     int64
-	Processed atomic.Int64
-	LastID    atomic.Uint64
+	Total     int64        // COUNT(*) of members at scan start
+	Processed atomic.Int64 // total walked by producer (includes filtered)
+
+	// per-scan breakdown of what producer filtered vs queued
+	FilteredNonCN     atomic.Int64 // skipped because server is non-CN
+	FilteredRecent    atomic.Int64 // skipped because LogsSyncTime < 1h ago
+	Queued            atomic.Int64 // passed shouldSync → handed to workers
+	MembersNoCharID   atomic.Int64 // worker resolved charID=0 (not on fflogs)
+	MembersWithData   atomic.Int64 // worker uploaded at least one fight
+	FightsUploaded    atomic.Int64 // successful POST /fight/ calls
+	MemberSyncErrors  atomic.Int64 // worker hit FFLogs / network error
+
+	LastID atomic.Uint64 // most recently walked member PK (producer cursor)
 )
+
+// resetScanCounters zeros all per-scan counters. Called at SyncMembers entry
+// so each scan starts with a clean slate.
+func resetScanCounters() {
+	Processed.Store(0)
+	FilteredNonCN.Store(0)
+	FilteredRecent.Store(0)
+	Queued.Store(0)
+	MembersNoCharID.Store(0)
+	MembersWithData.Store(0)
+	FightsUploaded.Store(0)
+	MemberSyncErrors.Store(0)
+	LastID.Store(0)
+}
 
 // SyncMembers runs a full scan over all members: produces them into a
 // channel, spawns WorkerCount workers that pull members, acquire a key from
@@ -55,6 +80,7 @@ func SyncMembers() error {
 	}
 
 	markScanStarted()
+	scanStart := time.Now()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,8 +88,9 @@ func SyncMembers() error {
 	if err := flow.DB.Model(&model.Member{}).Count(&Total).Error; err != nil {
 		return err
 	}
-	Processed.Store(0)
-	LastID.Store(0)
+	resetScanCounters()
+
+	log.Info().Int64("total", Total).Int("workers", WorkerCount).Msg("scan started")
 
 	memberCh := make(chan model.Member, MemberQueueSize)
 
@@ -89,6 +116,19 @@ func SyncMembers() error {
 
 	workerWg.Wait()
 	prodWg.Wait()
+
+	log.Info().
+		Int64("total", Total).
+		Int64("walked", Processed.Load()).
+		Int64("filtered_non_cn", FilteredNonCN.Load()).
+		Int64("filtered_recent", FilteredRecent.Load()).
+		Int64("queued", Queued.Load()).
+		Int64("no_fflogs_char", MembersNoCharID.Load()).
+		Int64("with_data", MembersWithData.Load()).
+		Int64("fights_uploaded", FightsUploaded.Load()).
+		Int64("errors", MemberSyncErrors.Load()).
+		Dur("duration", time.Since(scanStart)).
+		Msg("scan completed")
 
 	return prodErr
 }
@@ -125,27 +165,42 @@ func produceMembers(ctx context.Context, out chan<- model.Member) error {
 			LastID.Store(uint64(m.ID))
 			Processed.Add(1)
 
-			if !shouldSync(m) {
-				continue
-			}
-
-			select {
-			case out <- m:
-			case <-ctx.Done():
-				return ctx.Err()
+			switch filterReason(m) {
+			case filterKeep:
+				Queued.Add(1)
+				select {
+				case out <- m:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			case filterNonCN:
+				FilteredNonCN.Add(1)
+			case filterRecent:
+				FilteredRecent.Add(1)
 			}
 		}
 	}
 }
 
-func shouldSync(m model.Member) bool {
+type filterResult int
+
+const (
+	filterKeep filterResult = iota
+	filterNonCN
+	filterRecent
+)
+
+// filterReason returns why this member should be skipped, or filterKeep to
+// queue it for the workers. Split out from the old shouldSync so the
+// producer can bump per-reason counters instead of a single "skipped".
+func filterReason(m model.Member) filterResult {
 	if m.LogsSyncTime != nil && time.Since(*m.LogsSyncTime) < RecentSyncSkip {
-		return false
+		return filterRecent
 	}
 	if IsNonCNServer(m.Server) {
-		return false
+		return filterNonCN
 	}
-	return true
+	return filterKeep
 }
 
 // IsNonCNServer reports whether the server name is purely ASCII — CN servers
@@ -206,12 +261,14 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 	// 2. resolve character id (Redis cache first)
 	charID, err := fflogs.ResolveCharacterID(memCtx, lease.Client, m.Name, m.Server, "cn")
 	if err != nil {
+		MemberSyncErrors.Add(1)
 		classifyAndMark(lease, err)
 		return err
 	}
 	if charID == 0 {
 		// character doesn't exist on fflogs — mark member as "synced" so we
 		// don't re-query for RecentSyncSkip
+		MembersNoCharID.Add(1)
 		markSynced(m)
 		return nil
 	}
@@ -223,6 +280,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 	}
 	best, err := fflogs.FetchBestFights(memCtx, lease.Client, charID, enc[0], enc[1], enc[2], enc[3])
 	if err != nil {
+		MemberSyncErrors.Add(1)
 		classifyAndMark(lease, err)
 		return err
 	}
@@ -230,6 +288,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 	// 4. per-zone: if a parse exists, fetch detail and POST to memo-server
 	// Note: each fight_detail is still one FFLogs call, so we keep using the
 	// same lease but report the extra cost so the pool can account for it.
+	uploadedZones := 0
 	for i, z := range InterestZones {
 		rank := best.Zone(i)
 		if rank == nil || len(rank.Ranks) == 0 {
@@ -241,6 +300,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 			if errors.Is(err, fflogs.ErrNoProgress) {
 				continue
 			}
+			MemberSyncErrors.Add(1)
 			classifyAndMark(lease, err)
 			return err
 		}
@@ -258,6 +318,8 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 			// memo-server errors aren't key errors — don't penalize the key
 			continue
 		}
+		FightsUploaded.Add(1)
+		uploadedZones++
 	}
 
 	// extra debit: each zone that had data costs ~10 points for fight_detail,
@@ -269,6 +331,14 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 		}
 	}
 	Pool.Release(lease, zonesWithData*10)
+
+	if uploadedZones > 0 {
+		MembersWithData.Add(1)
+		log.Info().
+			Str("member", m.Name+"@"+m.Server).
+			Int("zones", uploadedZones).
+			Msg("member synced")
+	}
 
 	markSynced(m)
 	return nil

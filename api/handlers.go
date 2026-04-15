@@ -29,6 +29,15 @@ func GetProgress(c *gin.Context) {
 		Current:        processed,
 		LastID:         lastID,
 		WaitingWorkers: snap.WaitingWorkers,
+		Counters: model.ScanCounters{
+			FilteredNonCN:    memo.FilteredNonCN.Load(),
+			FilteredRecent:   memo.FilteredRecent.Load(),
+			Queued:           memo.Queued.Load(),
+			NoFFLogsChar:     memo.MembersNoCharID.Load(),
+			MembersWithData:  memo.MembersWithData.Load(),
+			FightsUploaded:   memo.FightsUploaded.Load(),
+			MemberSyncErrors: memo.MemberSyncErrors.Load(),
+		},
 	}
 
 	if !snap.ScanStartedAt.IsZero() {
