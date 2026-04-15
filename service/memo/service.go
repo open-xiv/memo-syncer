@@ -160,7 +160,8 @@ func IsNonCNServer(s string) bool {
 }
 
 // runWorker consumes members from memberCh until the channel is closed, and
-// delegates each member to syncOneMember.
+// delegates each member to syncOneMember. A per-member recover keeps a panic
+// isolated to one member instead of killing the whole worker goroutine.
 func runWorker(ctx context.Context, id int, in <-chan model.Member) {
 	for {
 		select {
@@ -168,11 +169,21 @@ func runWorker(ctx context.Context, id int, in <-chan model.Member) {
 			if !ok {
 				return
 			}
-			if err := syncOneMember(ctx, m); err != nil {
-				log.Error().Err(err).Int("worker", id).
-					Str("member", m.Name+"@"+m.Server).
-					Msg("sync member failed")
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().Int("worker", id).
+							Str("member", m.Name+"@"+m.Server).
+							Interface("panic", r).
+							Msg("sync member panicked")
+					}
+				}()
+				if err := syncOneMember(ctx, m); err != nil {
+					log.Error().Err(err).Int("worker", id).
+						Str("member", m.Name+"@"+m.Server).
+						Msg("sync member failed")
+				}
+			}()
 		case <-ctx.Done():
 			return
 		}

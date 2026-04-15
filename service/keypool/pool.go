@@ -6,6 +6,7 @@ import (
 	"memo-syncer/flow"
 	"memo-syncer/model"
 	"memo-syncer/service/fflogs"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,12 +36,58 @@ var (
 
 	// DisabledCooldown is how long a key stays dark after 401/403.
 	DisabledCooldown = 48 * time.Hour
+
+	// DefaultLimitPerHour is assumed when FFLogs returns 0 from its initial
+	// rateLimitData probe (which it does for freshly-created OAuth clients
+	// before they've ever made a real query). FFLogs v2 default for new
+	// clients appears to be ~5000 points/hour; erring low is safer because
+	// Reconcile will correct upward after the first real query warms the
+	// account, while starting too high would cause 429s.
+	DefaultLimitPerHour = 5000
+
+	// ProbeStagger adds a delay between consecutive key probes at startup
+	// so 20+ keys don't burst /oauth/token and trip FFLogs' OAuth rate limit.
+	ProbeStagger = 300 * time.Millisecond
+
+	// ForbiddenErrThreshold: any logs_keys row whose err_count has reached
+	// (or passed) this value is treated as permanently broken — Load skips
+	// it, and probe/MarkError bump straight to this number when they see a
+	// definitive invalid_client response.
+	ForbiddenErrThreshold = uint(100)
 )
 
 var (
-	ErrNoKey       = errors.New("keypool: no key available")
+	ErrNoKey        = errors.New("keypool: no key available")
 	ErrAllExhausted = errors.New("keypool: all keys exhausted")
 )
+
+// isInvalidClient detects FFLogs' permanent "your OAuth credentials are
+// wrong/revoked" error — distinct from transient 429 / 5xx failures.
+func isInvalidClient(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "invalid_client") ||
+		strings.Contains(msg, "unauthorized_client") ||
+		strings.Contains(msg, "Client authentication failed")
+}
+
+// forbidInDB writes err_count = ForbiddenErrThreshold directly so the next
+// Pool.Load filters this row out. Used as a hard-kill for keys that we're
+// confident will never work again (invalid_client / 401 / 403).
+func forbidInDB(ctx context.Context, keyID uint) {
+	if keyID == 0 {
+		return // env key, no DB row
+	}
+	err := flow.DB.WithContext(ctx).
+		Model(&model.LogsKey{}).
+		Where("id = ?", keyID).
+		Update("err_count", ForbiddenErrThreshold).Error
+	if err != nil {
+		log.Warn().Err(err).Uint("key_id", keyID).Msg("failed to mark key forbidden")
+	}
+}
 
 // Pool is the set of live FFLogs keys shared by all workers. Acquire selects
 // the key with the most remaining quota and returns a lease that must be
@@ -67,12 +114,25 @@ type Lease struct {
 // keep the DB mapping stable.
 func (p *Pool) Load(ctx context.Context) error {
 	var rows []model.LogsKey
-	if err := flow.DB.Find(&rows).Error; err != nil {
+	// skip keys already marked forbidden (err_count reached the threshold),
+	// so discord donors whose OAuth credentials were revoked don't cost us a
+	// probe on every restart
+	if err := flow.DB.Where("err_count < ?", ForbiddenErrThreshold).Find(&rows).Error; err != nil {
 		return err
 	}
 
 	states := make([]*KeyState, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
+		// stagger probes so 21 OAuth token requests don't burst
+		// FFLogs' /oauth/token endpoint and earn a global 429
+		if i > 0 {
+			select {
+			case <-time.After(ProbeStagger):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
 		st := &KeyState{
 			ID:       row.ID,
 			ClientID: row.Client,
@@ -121,19 +181,44 @@ func (p *Pool) AddEnvKey(ctx context.Context, clientID, clientSecret string) err
 
 // probe fetches the initial rateLimitData for a key. On failure the key is
 // marked disabled so a single bad donation doesn't take down startup.
+// Permanent failures (invalid_client) also write err_count=forbidden to DB
+// so future Load calls skip the key entirely.
 func (p *Pool) probe(ctx context.Context, st *KeyState) {
 	data, err := fflogs.FetchRateLimit(ctx, st.Client)
 	if err != nil {
-		log.Warn().Err(err).Uint("key_id", st.ID).Msg("initial rate limit probe failed, disabling")
+		if isInvalidClient(err) {
+			log.Warn().Err(err).Uint("key_id", st.ID).Msg("key permanently invalid, marking forbidden")
+			st.Disabled = true
+			st.ErrCount++
+			forbidInDB(ctx, st.ID)
+			return
+		}
+		log.Warn().Err(err).Uint("key_id", st.ID).Msg("initial rate limit probe failed, disabling for session")
 		st.Disabled = true
 		st.ErrCount++
 		return
 	}
 
 	now := time.Now()
-	st.Limit = data.LimitPerHour
-	st.SpentEstimate = data.PointsSpentThisHour
-	st.ResetAt = now.Add(time.Duration(data.PointsResetIn) * time.Second)
+	st.Limit = int(data.LimitPerHour)
+	// FFLogs returns limitPerHour=0 for freshly-created OAuth clients that
+	// haven't made any real queries yet; fall back to the documented default
+	// so these keys can participate. Reconcile will replace this with the
+	// true limit after the first few queries warm them up.
+	if st.Limit == 0 {
+		st.Limit = DefaultLimitPerHour
+	}
+	// round up spent so Remaining() is slightly conservative
+	st.SpentEstimate = int(data.PointsSpentThisHour)
+	if data.PointsSpentThisHour > float64(st.SpentEstimate) {
+		st.SpentEstimate++
+	}
+	st.ResetAt = now.Add(time.Duration(data.PointsResetIn * float64(time.Second)))
+	// if reset window is missing (e.g. Limit defaulted above and server
+	// returned 0 seconds), project 1 hour forward so the key isn't stuck
+	if !st.ResetAt.After(now) {
+		st.ResetAt = now.Add(time.Hour)
+	}
 	st.LastRefreshAt = now
 
 	log.Info().
@@ -276,10 +361,10 @@ const (
 // should not use its client again.
 func (p *Pool) MarkError(lease *Lease, kind ErrorKind) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	st := lease.State
 	st.ErrCount++
+
+	var forbid bool
 
 	switch kind {
 	case ErrRateLimited:
@@ -290,10 +375,18 @@ func (p *Pool) MarkError(lease *Lease, kind ErrorKind) {
 	case ErrUnauthorized:
 		st.Disabled = true
 		st.CooldownUntil = time.Now().Add(DisabledCooldown)
-		log.Warn().Uint("key_id", st.ID).Msg("key unauthorized, disabled for 24h")
+		forbid = true
+		log.Warn().Uint("key_id", st.ID).Msg("key unauthorized, marking forbidden")
 
 	case ErrTransient:
 		// nothing permanent; caller retries with next Acquire
+	}
+
+	keyID := st.ID
+	p.mu.Unlock()
+
+	if forbid {
+		forbidInDB(context.Background(), keyID)
 	}
 }
 
@@ -330,9 +423,20 @@ func (p *Pool) Reconcile(ctx context.Context) {
 
 		now := time.Now()
 		p.mu.Lock()
-		k.Limit = data.LimitPerHour
-		k.SpentEstimate = data.PointsSpentThisHour
-		k.ResetAt = now.Add(time.Duration(data.PointsResetIn) * time.Second)
+		// Only overwrite Limit with a non-zero value. FFLogs sometimes
+		// returns limitPerHour=0 mid-session (same quirk as the initial
+		// probe). Preserving the prior Limit lets the key keep serving
+		// traffic; the spent/reset figures are always trustworthy.
+		if incomingLimit := int(data.LimitPerHour); incomingLimit > 0 {
+			k.Limit = incomingLimit
+		}
+		k.SpentEstimate = int(data.PointsSpentThisHour)
+		if data.PointsSpentThisHour > float64(k.SpentEstimate) {
+			k.SpentEstimate++
+		}
+		if data.PointsResetIn > 0 {
+			k.ResetAt = now.Add(time.Duration(data.PointsResetIn * float64(time.Second)))
+		}
 		k.LastRefreshAt = now
 		k.UsesSinceRefresh = 0
 		p.mu.Unlock()

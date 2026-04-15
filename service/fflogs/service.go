@@ -53,7 +53,8 @@ func charIDCacheKey(name, server, region string) string {
 
 // BuildMemberZoneProgress takes the result of a single aliased best-fight
 // ranking and follows through to fight_detail, returning the fight ready for
-// upload. Returns ErrNoProgress when the member has no kills in that zone.
+// upload. Returns ErrNoProgress when the member has no kills in that zone or
+// the underlying report is incomplete.
 func BuildMemberZoneProgress(ctx context.Context, c *Client, rank *EncounterRanking) (*model.Fight, error) {
 	if rank == nil || len(rank.Ranks) == 0 {
 		return nil, ErrNoProgress
@@ -66,7 +67,12 @@ func BuildMemberZoneProgress(ctx context.Context, c *Client, rank *EncounterRank
 	if err != nil {
 		return nil, err
 	}
-	return MapToMemo(*detail), nil
+
+	fight := MapToMemo(*detail)
+	if fight == nil {
+		return nil, ErrNoProgress
+	}
+	return fight, nil
 }
 
 // GroupServer builds a name→server map from report.masterData.actors (fight
@@ -90,13 +96,24 @@ func GroupDeath(fight FightDetail) map[string]int {
 }
 
 // MapToMemo translates a FFLogs fight report into the memo-server Fight DTO.
+// Returns nil when the report is incomplete (empty fights or empty composition)
+// — the caller should treat nil the same as ErrNoProgress and skip the member.
 func MapToMemo(detail FightDetail) *model.Fight {
 	report := detail.ReportData.Report
+
+	// defensive checks: FFLogs may return rankings that point to a deleted or
+	// partially-indexed report, in which case Fights[] or Composition[] is empty.
+	if len(report.Fights) == 0 {
+		return nil
+	}
+	if len(report.Table.Data.Composition) == 0 {
+		return nil
+	}
 
 	serverMap := GroupServer(detail)
 	deathMap := GroupDeath(detail)
 
-	var players []model.Player
+	players := make([]model.Player, 0, len(report.Table.Data.Composition))
 	for _, p := range report.Table.Data.Composition {
 		players = append(players, model.Player{
 			Name:       p.Name,
@@ -107,14 +124,15 @@ func MapToMemo(detail FightDetail) *model.Fight {
 		})
 	}
 
-	isClear := report.Fights[0].Kill
-	enemyHP := report.Fights[0].BossPercentage
+	first := report.Fights[0]
+	isClear := first.Kill
+	enemyHP := first.BossPercentage
 	if isClear {
 		enemyHP = 0
 	}
 
 	return &model.Fight{
-		StartTime: time.UnixMilli(int64(report.StartTime + report.Fights[0].StartTime)),
+		StartTime: time.UnixMilli(int64(report.StartTime + first.StartTime)),
 		Duration:  time.Duration(report.Table.Data.CombatTime) * time.Millisecond,
 
 		ZoneID:  uint(report.Zone.ID),
@@ -124,7 +142,7 @@ func MapToMemo(detail FightDetail) *model.Fight {
 		Progress: model.Progress{
 			Phase:    0,
 			Subphase: 0,
-			EnemyID:  uint(report.Fights[0].EncounterID),
+			EnemyID:  uint(first.EncounterID),
 			EnemyHp:  enemyHP,
 		},
 	}
