@@ -11,6 +11,13 @@ import (
 )
 
 func GetProgress(c *gin.Context) {
+	// /progress is a live counter; browsers should NEVER cache it.
+	// Without these headers, Chrome's heuristic cache keeps showing a
+	// stale body while the sync goroutine keeps updating in the server.
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
 	snap := memo.CurrentSnapshot()
 	total := memo.Total
 	processed := memo.Processed.Load()
