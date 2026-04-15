@@ -2,46 +2,40 @@ package fflogs
 
 import (
 	"context"
-	"memo-syncer/flow"
+
+	"github.com/machinebox/graphql"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
-func FetchCharacterID(ctx context.Context, name, server, region string) (int, error) {
-	vars := map[string]any{
-		"server": server,
-		"name":   name,
-		"region": region,
-	}
-	var res CharacterID
+const (
+	TokenURL = "https://www.fflogs.com/oauth/token"
+	APIURL   = "https://www.fflogs.com/api/v2/client"
+)
 
-	err := flow.Query(ctx, characterIDQuery, vars, &res)
-	return res.CharacterData.Character.Id, err
+// Client wraps an authenticated FFLogs v2 GraphQL client tied to a single
+// (clientID, clientSecret) pair. The keypool constructs one per donated key
+// and reuses it so the OAuth token stays cached inside the transport.
+type Client struct {
+	graphql *graphql.Client
 }
 
-func FetchBestFightByEncounter(ctx context.Context, id, encounter int) (*EncounterRanked, error) {
-	vars := map[string]any{
-		"encounterID": encounter,
-		"charID":      id,
+func NewClient(clientID, clientSecret string) *Client {
+	cfg := &clientcredentials.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		TokenURL:     TokenURL,
 	}
-	var res EncounterRanked
+	oauthClient := cfg.Client(context.Background())
 
-	err := flow.Query(ctx, bestFightQuery, vars, &res)
-	return &res, err
+	return &Client{
+		graphql: graphql.NewClient(APIURL, graphql.WithHTTPClient(oauthClient)),
+	}
 }
 
-func FetchFightDetail(ctx context.Context, report string, fight int) (*FightDetail, error) {
-	vars := map[string]any{
-		"code":    report,
-		"fightID": fight,
+func (c *Client) Query(ctx context.Context, query string, vars map[string]any, res any) error {
+	req := graphql.NewRequest(query)
+	for k, v := range vars {
+		req.Var(k, v)
 	}
-	var res FightDetail
-
-	err := flow.Query(ctx, fightDetailQuery, vars, &res)
-	return &res, err
-}
-
-func FetchJobs(ctx context.Context) (*Jobs, error) {
-	var res Jobs
-
-	err := flow.Query(ctx, jobsQuery, nil, &res)
-	return &res, err
+	return c.graphql.Run(ctx, req, res)
 }

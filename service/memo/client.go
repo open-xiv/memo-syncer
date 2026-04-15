@@ -25,7 +25,7 @@ func CreateFight(ctx context.Context, fight *model.Fight) error {
 		return fmt.Errorf("failed to marshal fight: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", ApiURL+"/fight", bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", ApiURL+"/fight/", bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

@@ -1,0 +1,10 @@
+query GetBestFights($charID: Int!, $enc1: Int!, $enc2: Int!, $enc3: Int!, $enc4: Int!) {
+    characterData {
+        character(id: $charID) {
+            m1: encounterRankings(encounterID: $enc1, metric: default)
+            m2: encounterRankings(encounterID: $enc2, metric: default)
+            m3: encounterRankings(encounterID: $enc3, metric: default)
+            m4: encounterRankings(encounterID: $enc4, metric: default)
+        }
+    }
+}
