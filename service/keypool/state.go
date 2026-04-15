@@ -24,7 +24,8 @@ type KeyState struct {
 	ErrCount         uint      // drained by FlushStats, persisted to DB
 
 	// lifecycle
-	Disabled bool      // 401/403 or admin kill switch
+	Disabled      bool      // 401/403 or admin kill switch (may be transient)
+	Forbidden     bool      // permanently dead — invalid_client seen; skip retries
 	CooldownUntil time.Time // per-error cooldown (e.g. 429 retry-after)
 }
 

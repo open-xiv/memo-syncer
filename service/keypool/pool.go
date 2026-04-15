@@ -49,6 +49,16 @@ var (
 	// so 20+ keys don't burst /oauth/token and trip FFLogs' OAuth rate limit.
 	ProbeStagger = 300 * time.Millisecond
 
+	// ProbeRetryStagger is the slower spacing used for the second attempt
+	// on keys that failed phase-1 probing — CloudFlare's OAuth rate window
+	// has usually reset by the time we get here, but we go slower to avoid
+	// tripping it again.
+	ProbeRetryStagger = 2 * time.Second
+
+	// ProbeRetryCooldown is how long we wait after phase 1 before starting
+	// phase 2 retries, giving FFLogs' OAuth rate window time to reset.
+	ProbeRetryCooldown = 10 * time.Second
+
 	// ForbiddenErrThreshold: any logs_keys row whose err_count has reached
 	// (or passed) this value is treated as permanently broken — Load skips
 	// it, and probe/MarkError bump straight to this number when they see a
@@ -109,9 +119,10 @@ type Lease struct {
 }
 
 // Load reads logs_keys rows and creates LogsClients / fetches rateLimitData
-// for every row. Rows whose OAuth / rate-limit probe fails get flagged
-// Disabled and their ErrCount bumped, but they still live in the pool so we
-// keep the DB mapping stable.
+// for every row. Rows whose OAuth / rate-limit probe fails in phase 1 get
+// a second-chance retry in phase 2 after a cooldown — FFLogs' CloudFlare
+// layer often 429s the first burst of OAuth token requests, which is not
+// a real key failure.
 func (p *Pool) Load(ctx context.Context) error {
 	var rows []model.LogsKey
 	// skip keys already marked forbidden (err_count reached the threshold),
@@ -121,10 +132,9 @@ func (p *Pool) Load(ctx context.Context) error {
 		return err
 	}
 
+	// Phase 1: initial probe with fast stagger.
 	states := make([]*KeyState, 0, len(rows))
 	for i, row := range rows {
-		// stagger probes so 21 OAuth token requests don't burst
-		// FFLogs' /oauth/token endpoint and earn a global 429
 		if i > 0 {
 			select {
 			case <-time.After(ProbeStagger):
@@ -140,6 +150,46 @@ func (p *Pool) Load(ctx context.Context) error {
 		}
 		p.probe(ctx, st)
 		states = append(states, st)
+	}
+
+	// Phase 2: collect keys that were disabled for transient reasons (i.e.
+	// NOT permanently forbidden) and retry them after a cooldown. This
+	// gracefully recovers from FFLogs OAuth burst 429s that wrongly killed
+	// good keys in phase 1.
+	var retryable []*KeyState
+	for _, st := range states {
+		// Skip keys that hit invalid_client in phase 1 — forbidInDB already
+		// bumped their err_count and retrying won't help.
+		if st.Disabled && !st.Forbidden {
+			retryable = append(retryable, st)
+		}
+	}
+	if len(retryable) > 0 {
+		log.Info().
+			Int("retryable", len(retryable)).
+			Dur("cooldown", ProbeRetryCooldown).
+			Msg("phase-1 probes had transient failures, scheduling phase-2 retry")
+
+		select {
+		case <-time.After(ProbeRetryCooldown):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		for i, st := range retryable {
+			if i > 0 {
+				select {
+				case <-time.After(ProbeRetryStagger):
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			// Reset the session-disabled flag so probe can re-arm the key
+			// on success. Leave ErrCount as-is (it already reflects the
+			// failed attempt and will drain via FlushStats normally).
+			st.Disabled = false
+			p.probe(ctx, st)
+		}
 	}
 
 	p.mu.Lock()
@@ -189,15 +239,19 @@ func (p *Pool) probe(ctx context.Context, st *KeyState) {
 		if isInvalidClient(err) {
 			log.Warn().Err(err).Uint("key_id", st.ID).Msg("key permanently invalid, marking forbidden")
 			st.Disabled = true
+			st.Forbidden = true
 			st.ErrCount++
 			forbidInDB(ctx, st.ID)
 			return
 		}
-		log.Warn().Err(err).Uint("key_id", st.ID).Msg("initial rate limit probe failed, disabling for session")
+		log.Warn().Err(err).Uint("key_id", st.ID).Msg("rate limit probe failed (transient)")
 		st.Disabled = true
 		st.ErrCount++
 		return
 	}
+
+	// success: clear the session-disabled flag if this was a phase-2 retry
+	st.Disabled = false
 
 	now := time.Now()
 	st.Limit = int(data.LimitPerHour)
