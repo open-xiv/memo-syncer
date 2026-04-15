@@ -1,63 +1,67 @@
 package fflogs
 
+// CharacterID wraps the response of character_id.graphql.
 type CharacterID struct {
 	CharacterData struct {
 		Character struct {
-			Id int `json:"id"`
+			ID int `json:"id"`
 		} `json:"character"`
 	} `json:"characterData"`
 }
 
-type EncounterRanked struct {
+// Rank is the minimal slice of an encounterRankings.ranks[i] we actually read.
+type Rank struct {
+	Report struct {
+		Code    string `json:"code"`
+		FightID int    `json:"fightID"`
+	} `json:"report"`
+}
+
+// EncounterRanking is a trimmed projection of encounterRankings (FFLogs
+// returns a large JSON blob; we only touch Ranks[0].Report).
+type EncounterRanking struct {
+	Ranks []Rank `json:"ranks"`
+}
+
+// BestFights is the batched response from best_fights.graphql where four
+// zones are fetched in parallel via GraphQL aliases (m1..m4).
+type BestFights struct {
 	CharacterData struct {
 		Character struct {
-			Name              string `json:"name"`
-			EncounterRankings struct {
-				BestAmount         float64 `json:"bestAmount"`
-				MedianPerformance  float64 `json:"medianPerformance"`
-				AveragePerformance float64 `json:"averagePerformance"`
-				TotalKills         int     `json:"totalKills"`
-				FastestKill        int     `json:"fastestKill"`
-				Difficulty         int     `json:"difficulty"`
-				Metric             string  `json:"metric"`
-				Partition          int     `json:"partition"`
-				Zone               int     `json:"zone"`
-				Ranks              []struct {
-					LockedIn              bool    `json:"lockedIn"`
-					RankPercent           float64 `json:"rankPercent"`
-					HistoricalPercent     float64 `json:"historicalPercent"`
-					TodayPercent          float64 `json:"todayPercent"`
-					RankTotalParses       int     `json:"rankTotalParses"`
-					HistoricalTotalParses int     `json:"historicalTotalParses"`
-					TodayTotalParses      int     `json:"todayTotalParses"`
-					Report                struct {
-						Code      string `json:"code"`
-						StartTime int64  `json:"startTime"`
-						FightID   int    `json:"fightID"`
-					} `json:"report"`
-					Duration    int     `json:"duration"`
-					StartTime   int64   `json:"startTime"`
-					Amount      float64 `json:"amount"`
-					BracketData float64 `json:"bracketData"`
-					Spec        string  `json:"spec"`
-					BestSpec    string  `json:"bestSpec"`
-					Class       int     `json:"class"`
-				} `json:"ranks"`
-			} `json:"encounterRankings"`
+			M1 EncounterRanking `json:"m1"`
+			M2 EncounterRanking `json:"m2"`
+			M3 EncounterRanking `json:"m3"`
+			M4 EncounterRanking `json:"m4"`
 		} `json:"character"`
 	} `json:"characterData"`
 }
 
+// Zone returns the aliased ranking for a 0-indexed position (0..3).
+func (b *BestFights) Zone(i int) *EncounterRanking {
+	switch i {
+	case 0:
+		return &b.CharacterData.Character.M1
+	case 1:
+		return &b.CharacterData.Character.M2
+	case 2:
+		return &b.CharacterData.Character.M3
+	case 3:
+		return &b.CharacterData.Character.M4
+	}
+	return nil
+}
+
+// FightDetail wraps the response of fight_detail.graphql.
 type FightDetail struct {
 	ReportData struct {
 		Report struct {
 			Zone struct {
-				Id int `json:"id"`
+				ID int `json:"id"`
 			} `json:"zone"`
 			StartTime  int `json:"startTime"`
 			MasterData struct {
 				Actors []struct {
-					Id     int     `json:"id"`
+					ID     int     `json:"id"`
 					Name   string  `json:"name"`
 					Server *string `json:"server"`
 				} `json:"actors"`
@@ -75,7 +79,7 @@ type FightDetail struct {
 					CombatTime  int `json:"combatTime"`
 					Composition []struct {
 						Name  string `json:"name"`
-						Id    int    `json:"id"`
+						ID    int    `json:"id"`
 						Type  string `json:"type"`
 						Specs []struct {
 							Spec string `json:"spec"`
@@ -84,25 +88,11 @@ type FightDetail struct {
 					} `json:"composition"`
 					DeathEvents []struct {
 						Name string `json:"name"`
-						Id   int    `json:"id"`
+						ID   int    `json:"id"`
 						Type string `json:"type"`
 					} `json:"deathEvents"`
 				} `json:"data"`
 			} `json:"table"`
 		} `json:"report"`
 	} `json:"reportData"`
-}
-
-type Jobs struct {
-	GameData struct {
-		Classes []struct {
-			Id    int    `json:"id"`
-			Name  string `json:"name"`
-			Specs []struct {
-				Id   int    `json:"id"`
-				Name string `json:"name"`
-				Slug string `json:"slug"`
-			} `json:"specs"`
-		} `json:"classes"`
-	} `json:"gameData"`
 }
