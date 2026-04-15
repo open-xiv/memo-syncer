@@ -10,44 +10,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetProgress returns the live progress payload. The shape is defined in
+// /openapi.yaml — if you change it, update the spec file in the same commit.
 func GetProgress(c *gin.Context) {
 	// /progress is a live counter; browsers should NEVER cache it.
-	// Without these headers, Chrome's heuristic cache keeps showing a
-	// stale body while the sync goroutine keeps updating in the server.
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
 
 	snap := memo.CurrentSnapshot()
-	total := memo.Total
-	processed := memo.Processed.Load()
-	lastID := uint(memo.LastID.Load())
-
 	resp := model.ProgressResponse{
-		State:          snap.State,
-		Total:          total,
-		Current:        processed,
-		LastID:         lastID,
-		WaitingWorkers: snap.WaitingWorkers,
-		Counters: model.ScanCounters{
-			FilteredNonCN:    memo.FilteredNonCN.Load(),
-			FilteredRecent:   memo.FilteredRecent.Load(),
-			Queued:           memo.Queued.Load(),
-			NoFFLogsChar:     memo.MembersNoCharID.Load(),
-			MembersWithData:  memo.MembersWithData.Load(),
-			FightsUploaded:   memo.FightsUploaded.Load(),
-			MemberSyncErrors: memo.MemberSyncErrors.Load(),
+		State:        snap.State,
+		TotalMembers: memo.TotalMembers.Load(),
+		Scan:         buildCurrentScan(snap),
+		LastScan:     buildLastScan(),
+		Workers: model.WorkerStatsResponse{
+			Count:   memo.WorkerCount,
+			Waiting: snap.WaitingWorkers,
 		},
+		Keys: buildKeyStats(),
 	}
 
-	if !snap.ScanStartedAt.IsZero() {
-		t := snap.ScanStartedAt
-		resp.ScanStartedAt = &t
-	}
-	if !snap.ScanFinishedAt.IsZero() {
-		t := snap.ScanFinishedAt
-		resp.ScanFinishedAt = &t
-	}
 	if !snap.NextScanAt.IsZero() {
 		t := snap.NextScanAt
 		resp.NextScanAt = &t
@@ -57,33 +40,80 @@ func GetProgress(c *gin.Context) {
 		resp.KeysRecoverAt = &t
 	}
 
-	if lastID > 0 {
-		var m model.Member
-		if err := flow.DB.First(&m, lastID).Error; err == nil {
-			resp.Name = m.Name
-			resp.Server = m.Server
-		}
-	}
-
-	if memo.Pool != nil {
-		ps := memo.Pool.PoolSummary()
-		ks := &model.KeySummary{
-			Total:          ps.Total,
-			Active:         ps.Active,
-			Disabled:       ps.Disabled,
-			TotalLimit:     ps.TotalLimit,
-			TotalRemaining: ps.TotalRemaining,
-		}
-		if !ps.EarliestReset.IsZero() {
-			t := ps.EarliestReset
-			ks.EarliestReset = &t
-		}
-		resp.Keys = ks
-	}
-
 	c.JSON(http.StatusOK, resp)
 }
 
+func buildCurrentScan(snap memo.Snapshot) model.CurrentScanResponse {
+	scan := model.CurrentScanResponse{
+		Walked:         memo.Walked.Load(),
+		ExpectedQueued: memo.ExpectedQueued.Load(),
+		Counters: model.CountersResponse{
+			FilteredNonCN:   memo.FilteredNonCN.Load(),
+			FilteredRecent:  memo.FilteredRecent.Load(),
+			Queued:          memo.Queued.Load(),
+			NoFFLogsChar:    memo.MembersNoCharID.Load(),
+			MembersWithData: memo.MembersWithData.Load(),
+			FightsUploaded:  memo.FightsUploaded.Load(),
+			Errors:          memo.MemberSyncErrors.Load(),
+		},
+	}
+	if !snap.ScanStartedAt.IsZero() {
+		t := snap.ScanStartedAt
+		scan.StartedAt = &t
+	}
+	if m := memo.CurrentMember.Load(); m != nil {
+		scan.AtMember = &model.MemberRefDTO{
+			ID:     m.ID,
+			Name:   m.Name,
+			Server: m.Server,
+		}
+	}
+	return scan
+}
+
+func buildLastScan() *model.LastScanResponse {
+	ls := memo.LastScan()
+	if ls == nil {
+		return nil
+	}
+	return &model.LastScanResponse{
+		StartedAt:      ls.StartedAt,
+		FinishedAt:     ls.FinishedAt,
+		DurationMs:     ls.DurationMs,
+		Walked:         ls.Walked,
+		ExpectedQueued: ls.ExpectedQueued,
+		Counters: model.CountersResponse{
+			FilteredNonCN:   ls.FilteredNonCN,
+			FilteredRecent:  ls.FilteredRecent,
+			Queued:          ls.Queued,
+			NoFFLogsChar:    ls.NoFFLogsChar,
+			MembersWithData: ls.MembersWithData,
+			FightsUploaded:  ls.FightsUploaded,
+			Errors:          ls.Errors,
+		},
+	}
+}
+
+func buildKeyStats() *model.KeyStatsResponse {
+	if memo.Pool == nil {
+		return nil
+	}
+	ps := memo.Pool.PoolSummary()
+	resp := &model.KeyStatsResponse{
+		Total:          ps.Total,
+		Active:         ps.Active,
+		Disabled:       ps.Disabled,
+		TotalLimit:     ps.TotalLimit,
+		TotalRemaining: ps.TotalRemaining,
+	}
+	if !ps.EarliestReset.IsZero() {
+		t := ps.EarliestReset
+		resp.EarliestReset = &t
+	}
+	return resp
+}
+
+// GetMemberProgress returns metadata for a single member by `name@server`.
 func GetMemberProgress(c *gin.Context) {
 	raw := c.Param("name")
 
