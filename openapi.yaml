@@ -1,0 +1,473 @@
+openapi: 3.1.0
+info:
+  title: memo-syncer API
+  description: |
+    Background worker that refreshes FFXIV M9S–M12S clear data for tracked
+    members by querying FFLogs v2 and pushing normalized fight records to
+    memo-server.
+
+    The syncer runs a scan loop every ~10 minutes. Each scan walks every
+    member row in the shared `members` table, filters out non-CN and
+    recently-synced rows, then has 8 workers fetch FFLogs data for the
+    rest and POST the results to memo-server.
+
+    This document covers the observability endpoints exposed by the
+    syncer itself. Write traffic (POST /fight/) targets `memo-server` and
+    is documented in that service's spec.
+  version: 1.0.0
+
+servers:
+  - url: https://memo-sync.fly.dev
+
+tags:
+  - name: status
+  - name: progress
+
+paths:
+  /status:
+    get:
+      tags: [status]
+      summary: Liveness check
+      operationId: getStatus
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  /progress/:
+    get:
+      tags: [progress]
+      summary: Live sync progress + pool health
+      description: |
+        Returns a snapshot of the sync loop. The response is always
+        `Cache-Control: no-store` so frontends can poll it freely.
+
+        ### Typical usage for a progress-ring UI
+        - Ring fill while scanning:
+          `scan.counters.queued / scan.expected_queued`
+        - Ring fill while idle (countdown to next scan):
+          `(now - last_scan.finished_at) / (next_scan_at - last_scan.finished_at)`
+        - When `state == "waiting_for_keys"`, render a recovery
+          countdown using `keys_recover_at`.
+
+        Fields are grouped so the three common UI modes map to disjoint
+        sections:
+        - `scan`: live work in the current iteration (may be zero during idle)
+        - `last_scan`: frozen result of the previous iteration
+        - `keys`: pool health, always present when the pool is loaded
+      operationId: getProgress
+      responses:
+        "200":
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: "no-store, no-cache, must-revalidate, max-age=0"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+              examples:
+                scanning:
+                  summary: Mid-scan, workers busy
+                  value:
+                    state: scanning
+                    total_members: 156553
+                    scan:
+                      started_at: "2026-04-15T22:51:47Z"
+                      walked: 15044
+                      expected_queued: 19207
+                      at_member:
+                        id: 55396
+                        name: "苏啾啾"
+                        server: "延夏"
+                      counters:
+                        filtered_non_cn: 3532
+                        filtered_recent: 3071
+                        queued: 8441
+                        no_fflogs_char: 8118
+                        members_with_data: 234
+                        fights_uploaded: 786
+                        errors: 0
+                    last_scan:
+                      started_at: "2026-04-15T22:39:17Z"
+                      finished_at: "2026-04-15T22:39:32Z"
+                      duration_ms: 14135
+                      walked: 156546
+                      expected_queued: 18
+                      counters:
+                        filtered_non_cn: 80168
+                        filtered_recent: 76366
+                        queued: 18
+                        no_fflogs_char: 12
+                        members_with_data: 4
+                        fights_uploaded: 14
+                        errors: 0
+                    workers:
+                      count: 8
+                      waiting: 0
+                    keys:
+                      total: 20
+                      active: 20
+                      disabled: 0
+                      total_limit: 113000
+                      total_remaining: 93824
+                      earliest_reset: "2026-04-15T23:22:37Z"
+                idle:
+                  summary: Between scans
+                  value:
+                    state: idle
+                    total_members: 156553
+                    scan:
+                      started_at: "2026-04-15T22:51:47Z"
+                      walked: 156553
+                      expected_queued: 19207
+                      counters:
+                        filtered_non_cn: 80168
+                        filtered_recent: 57177
+                        queued: 19208
+                        no_fflogs_char: 17804
+                        members_with_data: 1253
+                        fights_uploaded: 4402
+                        errors: 0
+                    last_scan:
+                      started_at: "2026-04-15T22:51:47Z"
+                      finished_at: "2026-04-15T22:58:12Z"
+                      duration_ms: 385000
+                      walked: 156553
+                      expected_queued: 19207
+                      counters:
+                        filtered_non_cn: 80168
+                        filtered_recent: 57177
+                        queued: 19208
+                        no_fflogs_char: 17804
+                        members_with_data: 1253
+                        fights_uploaded: 4402
+                        errors: 0
+                    next_scan_at: "2026-04-15T23:08:12Z"
+                    workers:
+                      count: 8
+                      waiting: 0
+                    keys:
+                      total: 20
+                      active: 20
+                      disabled: 0
+                      total_limit: 113000
+                      total_remaining: 100420
+                      earliest_reset: "2026-04-15T23:22:37Z"
+                waiting_for_keys:
+                  summary: All keys exhausted, workers blocked
+                  value:
+                    state: waiting_for_keys
+                    total_members: 156553
+                    scan:
+                      started_at: "2026-04-15T22:51:47Z"
+                      walked: 41200
+                      expected_queued: 19207
+                      counters:
+                        filtered_non_cn: 21000
+                        filtered_recent: 15800
+                        queued: 4400
+                        no_fflogs_char: 4100
+                        members_with_data: 184
+                        fights_uploaded: 612
+                        errors: 3
+                    keys_recover_at: "2026-04-15T23:22:37Z"
+                    workers:
+                      count: 8
+                      waiting: 8
+                    keys:
+                      total: 20
+                      active: 20
+                      disabled: 0
+                      total_limit: 113000
+                      total_remaining: 0
+                      earliest_reset: "2026-04-15T23:22:37Z"
+
+  /progress/{name}:
+    get:
+      tags: [progress]
+      summary: Per-member sync metadata
+      description: Returns the last successful sync time for a single member.
+      operationId: getMemberProgress
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: "Format: `name@server` (URL-encoded if the name contains Unicode)."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  schemas:
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: OK
+
+    ProgressResponse:
+      type: object
+      required: [state, total_members, scan, workers]
+      properties:
+        state:
+          type: string
+          enum: [scanning, idle, waiting_for_keys]
+          description: |
+            Coarse-grained loop state.
+            - `scanning`: a scan iteration is running, workers are active
+            - `idle`: between scans, waiting for the next tick
+            - `waiting_for_keys`: a worker is blocked on Pool.Acquire
+              because every donated key is over its FFLogs quota
+        total_members:
+          type: integer
+          format: int64
+          description: COUNT(*) of the shared members table at scan start.
+        scan:
+          $ref: "#/components/schemas/CurrentScan"
+        last_scan:
+          oneOf:
+            - $ref: "#/components/schemas/LastScan"
+            - type: "null"
+          description: Null before the first scan finishes.
+        next_scan_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Only populated when `state == "idle"`.
+        keys_recover_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Earliest `ResetAt` among exhausted keys. Only populated when
+            `state == "waiting_for_keys"` — the UI can subtract `now` to
+            show a recovery countdown.
+        workers:
+          $ref: "#/components/schemas/WorkerStats"
+        keys:
+          oneOf:
+            - $ref: "#/components/schemas/KeyStats"
+            - type: "null"
+          description: Null if the FFLogs pool hasn't been loaded yet.
+
+    CurrentScan:
+      type: object
+      description: |
+        Live counters for the in-flight scan. All values are reset at the
+        start of each scan. During idle they still hold the values of the
+        just-finished scan, but `last_scan` is the authoritative frozen
+        snapshot for UI purposes.
+      required: [walked, expected_queued, counters]
+      properties:
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        walked:
+          type: integer
+          format: int64
+          description: |
+            Members the producer has iterated (includes filtered rows).
+            Grows much faster than work actually done. Prefer
+            `counters.queued / expected_queued` for the progress ring.
+        expected_queued:
+          type: integer
+          format: int64
+          description: |
+            Pre-computed denominator — number of CN members that actually
+            need work this scan (stale or never synced). Use as the ring
+            denominator: `counters.queued / expected_queued`.
+        at_member:
+          oneOf:
+            - $ref: "#/components/schemas/MemberRef"
+            - type: "null"
+          description: |
+            Identity of the member the producer is currently walking.
+            Updated atomically with every row, so polling /progress at
+            ~1Hz will show a live "scanning 角色名@服务器" marquee.
+        counters:
+          $ref: "#/components/schemas/Counters"
+
+    LastScan:
+      type: object
+      required:
+        - started_at
+        - finished_at
+        - duration_ms
+        - walked
+        - expected_queued
+        - counters
+      properties:
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          format: int64
+        walked:
+          type: integer
+          format: int64
+        expected_queued:
+          type: integer
+          format: int64
+        counters:
+          $ref: "#/components/schemas/Counters"
+
+    Counters:
+      type: object
+      description: |
+        Per-scan outcome breakdown. `filtered_*` categories short-circuit
+        inside the producer and never touch FFLogs. The remaining rows
+        map 1:1 to worker invocations.
+      required:
+        - filtered_non_cn
+        - filtered_recent
+        - queued
+        - no_fflogs_char
+        - members_with_data
+        - fights_uploaded
+        - errors
+      properties:
+        filtered_non_cn:
+          type: integer
+          format: int64
+          description: Skipped because the server is not a CN server (ASCII-only).
+        filtered_recent:
+          type: integer
+          format: int64
+          description: Skipped because `logs_sync_time` is within the 1h window.
+        queued:
+          type: integer
+          format: int64
+          description: Passed filters and handed to the worker channel.
+        no_fflogs_char:
+          type: integer
+          format: int64
+          description: Worker resolved `character_id = 0` — character not on FFLogs.
+        members_with_data:
+          type: integer
+          format: int64
+          description: Members for whom at least one fight was uploaded this scan.
+        fights_uploaded:
+          type: integer
+          format: int64
+          description: Total successful POST /fight/ responses (2xx).
+        errors:
+          type: integer
+          format: int64
+          description: |
+            Transient FFLogs/network errors. Does NOT count memo-server
+            upload failures (those are logged but not tracked here).
+
+    MemberRef:
+      type: object
+      required: [id, name, server]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        server:
+          type: string
+
+    WorkerStats:
+      type: object
+      required: [count, waiting]
+      properties:
+        count:
+          type: integer
+          description: Total worker goroutines (fixed at boot).
+        waiting:
+          type: integer
+          description: |
+            Number of workers currently blocked on `Pool.Acquire` waiting
+            for a FFLogs key to free up. >0 is fine for a short burst;
+            persistent >0 means the pool is undersized.
+
+    KeyStats:
+      type: object
+      required:
+        - total
+        - active
+        - disabled
+        - total_limit
+        - total_remaining
+      properties:
+        total:
+          type: integer
+          description: Rows currently loaded into the pool (after err_count filter).
+        active:
+          type: integer
+          description: Keys that are available for acquisition right now.
+        disabled:
+          type: integer
+          description: Keys marked disabled this session (includes cooldown-locked).
+        total_limit:
+          type: integer
+          description: Sum of `LimitPerHour` across active keys.
+        total_remaining:
+          type: integer
+          description: Sum of `max(0, Limit - SpentEstimate)` across active keys.
+        earliest_reset:
+          type: string
+          format: date-time
+          nullable: true
+          description: Earliest `ResetAt` among active keys.
+
+    MemberResponse:
+      type: object
+      required: [name, server]
+      properties:
+        name:
+          type: string
+        server:
+          type: string
+        last_sync_time:
+          type: string
+          format: date-time
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

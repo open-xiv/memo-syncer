@@ -39,25 +39,66 @@ var (
 // Progress counters exposed to the /progress handler. All atomic so /progress
 // can read them without locking the scan loop.
 var (
-	Total     int64        // COUNT(*) of members at scan start
-	Processed atomic.Int64 // total walked by producer (includes filtered)
+	TotalMembers   atomic.Int64 // COUNT(*) of members at scan start
+	ExpectedQueued atomic.Int64 // stale+never-synced CN members at scan start (denominator for progress ring)
+
+	Walked atomic.Int64 // total walked by producer (includes filtered)
 
 	// per-scan breakdown of what producer filtered vs queued
-	FilteredNonCN     atomic.Int64 // skipped because server is non-CN
-	FilteredRecent    atomic.Int64 // skipped because LogsSyncTime < 1h ago
-	Queued            atomic.Int64 // passed shouldSync → handed to workers
-	MembersNoCharID   atomic.Int64 // worker resolved charID=0 (not on fflogs)
-	MembersWithData   atomic.Int64 // worker uploaded at least one fight
-	FightsUploaded    atomic.Int64 // successful POST /fight/ calls
-	MemberSyncErrors  atomic.Int64 // worker hit FFLogs / network error
+	FilteredNonCN    atomic.Int64
+	FilteredRecent   atomic.Int64
+	Queued           atomic.Int64
+	MembersNoCharID  atomic.Int64
+	MembersWithData  atomic.Int64
+	FightsUploaded   atomic.Int64
+	MemberSyncErrors atomic.Int64
 
-	LastID atomic.Uint64 // most recently walked member PK (producer cursor)
+	LastID atomic.Uint64 // most recently walked member PK
+
+	// CurrentMember is the identity of the member the producer is walking
+	// RIGHT NOW. Cached here so /progress can avoid a DB lookup per request.
+	CurrentMember atomic.Pointer[MemberRef]
+
+	// lastScanSnapshot is the frozen result of the most recently completed
+	// scan. nil before the first scan finishes.
+	lastScanSnapshot atomic.Pointer[ScanSnapshot]
 )
+
+// MemberRef is a minimal member identity used by /progress.
+type MemberRef struct {
+	ID     uint
+	Name   string
+	Server string
+}
+
+// ScanSnapshot is a frozen record of a completed scan.
+type ScanSnapshot struct {
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	DurationMs     int64
+	Walked         int64
+	ExpectedQueued int64
+
+	FilteredNonCN    int64
+	FilteredRecent   int64
+	Queued           int64
+	NoFFLogsChar     int64
+	MembersWithData  int64
+	FightsUploaded   int64
+	Errors           int64
+}
+
+// LastScan returns the frozen snapshot of the previous completed scan, or
+// nil if no scan has finished yet.
+func LastScan() *ScanSnapshot {
+	return lastScanSnapshot.Load()
+}
 
 // resetScanCounters zeros all per-scan counters. Called at SyncMembers entry
 // so each scan starts with a clean slate.
 func resetScanCounters() {
-	Processed.Store(0)
+	Walked.Store(0)
+	ExpectedQueued.Store(0)
 	FilteredNonCN.Store(0)
 	FilteredRecent.Store(0)
 	Queued.Store(0)
@@ -66,6 +107,7 @@ func resetScanCounters() {
 	FightsUploaded.Store(0)
 	MemberSyncErrors.Store(0)
 	LastID.Store(0)
+	CurrentMember.Store(nil)
 }
 
 // SyncMembers runs a full scan over all members: produces them into a
@@ -85,12 +127,38 @@ func SyncMembers() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := flow.DB.Model(&model.Member{}).Count(&Total).Error; err != nil {
-		return err
-	}
 	resetScanCounters()
 
-	log.Info().Int64("total", Total).Int("workers", WorkerCount).Msg("scan started")
+	// count of rows we're about to walk (overall member total)
+	var total int64
+	if err := flow.DB.Model(&model.Member{}).Count(&total).Error; err != nil {
+		return err
+	}
+	TotalMembers.Store(total)
+
+	// pre-compute how many CN members actually need work this pass — this
+	// becomes the honest denominator for the /progress ring. We approximate
+	// "CN" as "server NOT purely ASCII" (same rule as IsNonCNServer) and
+	// "stale" as logs_sync_time IS NULL OR < now() - RecentSyncSkip.
+	//
+	// Uses a raw query because regex ops aren't trivially portable in gorm.
+	staleCutoff := time.Now().Add(-RecentSyncSkip)
+	var expected int64
+	if err := flow.DB.Raw(`
+		SELECT COUNT(*) FROM members
+		WHERE server !~ '^[A-Za-z0-9 ]+$'
+		  AND (logs_sync_time IS NULL OR logs_sync_time < ?)
+	`, staleCutoff).Scan(&expected).Error; err != nil {
+		log.Warn().Err(err).Msg("expected_queued precount failed; falling back to 0")
+		expected = 0
+	}
+	ExpectedQueued.Store(expected)
+
+	log.Info().
+		Int64("total", total).
+		Int64("expected_queued", expected).
+		Int("workers", WorkerCount).
+		Msg("scan started")
 
 	memberCh := make(chan model.Member, MemberQueueSize)
 
@@ -117,18 +185,41 @@ func SyncMembers() error {
 	workerWg.Wait()
 	prodWg.Wait()
 
+	// freeze the final counter values into an immutable snapshot so /progress
+	// can still surface "what did the last scan do" during idle.
+	finishedAt := time.Now()
+	snap := &ScanSnapshot{
+		StartedAt:       scanStart,
+		FinishedAt:      finishedAt,
+		DurationMs:      finishedAt.Sub(scanStart).Milliseconds(),
+		Walked:          Walked.Load(),
+		ExpectedQueued:  ExpectedQueued.Load(),
+		FilteredNonCN:   FilteredNonCN.Load(),
+		FilteredRecent:  FilteredRecent.Load(),
+		Queued:          Queued.Load(),
+		NoFFLogsChar:    MembersNoCharID.Load(),
+		MembersWithData: MembersWithData.Load(),
+		FightsUploaded:  FightsUploaded.Load(),
+		Errors:          MemberSyncErrors.Load(),
+	}
+	lastScanSnapshot.Store(snap)
+
 	log.Info().
-		Int64("total", Total).
-		Int64("walked", Processed.Load()).
-		Int64("filtered_non_cn", FilteredNonCN.Load()).
-		Int64("filtered_recent", FilteredRecent.Load()).
-		Int64("queued", Queued.Load()).
-		Int64("no_fflogs_char", MembersNoCharID.Load()).
-		Int64("with_data", MembersWithData.Load()).
-		Int64("fights_uploaded", FightsUploaded.Load()).
-		Int64("errors", MemberSyncErrors.Load()).
+		Int64("total", TotalMembers.Load()).
+		Int64("walked", snap.Walked).
+		Int64("expected_queued", snap.ExpectedQueued).
+		Int64("filtered_non_cn", snap.FilteredNonCN).
+		Int64("filtered_recent", snap.FilteredRecent).
+		Int64("queued", snap.Queued).
+		Int64("no_fflogs_char", snap.NoFFLogsChar).
+		Int64("with_data", snap.MembersWithData).
+		Int64("fights_uploaded", snap.FightsUploaded).
+		Int64("errors", snap.Errors).
 		Dur("duration", time.Since(scanStart)).
 		Msg("scan completed")
+
+	// clear current-member cache now that nothing is being walked
+	CurrentMember.Store(nil)
 
 	return prodErr
 }
@@ -163,7 +254,12 @@ func produceMembers(ctx context.Context, out chan<- model.Member) error {
 		for _, m := range batch {
 			lastID = m.ID
 			LastID.Store(uint64(m.ID))
-			Processed.Add(1)
+			Walked.Add(1)
+			CurrentMember.Store(&MemberRef{
+				ID:     m.ID,
+				Name:   m.Name,
+				Server: m.Server,
+			})
 
 			switch filterReason(m) {
 			case filterKeep:
