@@ -27,6 +27,11 @@ type ProgressResponse struct {
 	Total   int64 `json:"total"`
 	Current int64 `json:"current"`
 
+	// Per-scan breakdown. Resets at the start of each scan so the numbers
+	// always reflect "what has this scan done so far". Useful for polling
+	// /progress to see real-time activity.
+	Counters ScanCounters `json:"counters"`
+
 	LastID uint   `json:"last_id,omitempty"`
 	Name   string `json:"name,omitempty"`
 	Server string `json:"server,omitempty"`
@@ -39,6 +44,16 @@ type ProgressResponse struct {
 	WaitingWorkers int32 `json:"waiting_workers"`
 
 	Keys *KeySummary `json:"keys,omitempty"`
+}
+
+type ScanCounters struct {
+	FilteredNonCN    int64 `json:"filtered_non_cn"`     // skipped because server is EN/JP/EU
+	FilteredRecent   int64 `json:"filtered_recent"`     // skipped because synced within 1h
+	Queued           int64 `json:"queued"`              // passed filters and handed to workers
+	NoFFLogsChar     int64 `json:"no_fflogs_char"`      // worker resolved charID=0
+	MembersWithData  int64 `json:"members_with_data"`   // worker uploaded at least one fight
+	FightsUploaded   int64 `json:"fights_uploaded"`     // total POST /fight/ 2xx count
+	MemberSyncErrors int64 `json:"member_sync_errors"`  // transient FFLogs/net errors
 }
 
 type KeySummary struct {
