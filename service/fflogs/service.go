@@ -140,10 +140,10 @@ func MapToMemo(detail FightDetail) *model.Fight {
 
 		Clear: isClear,
 		Progress: model.Progress{
-			Phase:    0,
-			Subphase: 0,
-			EnemyID:  uint(first.EncounterID),
-			EnemyHp:  enemyHP,
+			Phase:     0,
+			PhaseName: "", // FFLogs doesn't expose engine-side phase names
+			EnemyID:   uint(first.EncounterID),
+			EnemyHp:   enemyHP,
 		},
 	}
 }

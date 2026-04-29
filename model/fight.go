@@ -3,8 +3,8 @@ package model
 import "time"
 
 type Progress struct {
-	Phase    uint `json:"phase"`
-	Subphase uint `json:"subphase"`
+	Phase     uint   `json:"phase"`
+	PhaseName string `json:"phase_name"`
 
 	EnemyID uint    `json:"enemy_id"`
 	EnemyHp float64 `json:"enemy_hp"`

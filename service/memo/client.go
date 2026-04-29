@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"memo-syncer/model"
+	"memo-syncer/version"
 	"net/http"
 	"os"
 	"sync"
@@ -43,6 +44,8 @@ func CreateFight(ctx context.Context, fight *model.Fight) error {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Auth-Key", os.Getenv("MEMO_KEY"))
+	req.Header.Set("X-Client-Name", version.ClientName)
+	req.Header.Set("X-Client-Version", version.Current)
 
 	resp, err := getHTTPClient().Do(req)
 	if err != nil {
