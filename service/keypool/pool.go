@@ -64,7 +64,25 @@ var (
 	// it, and probe/MarkError bump straight to this number when they see a
 	// definitive invalid_client response.
 	ForbiddenErrThreshold = uint(100)
+
+	// MaxResetIn caps the reset-window duration we accept from FFLogs.
+	// FFLogs is documented to use 1h windows; in production we've observed
+	// rare cases where rateLimitData returns implausibly large values
+	// (10⁶ seconds = days) likely from a malformed token-expiry coercion.
+	// Without this cap the auto-sleep loop in service.go would back off for
+	// days on a single bad probe.
+	MaxResetIn = time.Hour
 )
+
+// clampResetIn turns a (possibly malformed) seconds value from FFLogs into a
+// safe Duration capped at MaxResetIn. Negative or NaN-ish values fall back
+// to MaxResetIn so the next Reconcile gets a chance to overwrite.
+func clampResetIn(secs float64) time.Duration {
+	if secs <= 0 || secs > MaxResetIn.Seconds() {
+		return MaxResetIn
+	}
+	return time.Duration(secs * float64(time.Second))
+}
 
 var (
 	ErrNoKey        = errors.New("keypool: no key available")
@@ -267,12 +285,7 @@ func (p *Pool) probe(ctx context.Context, st *KeyState) {
 	if data.PointsSpentThisHour > float64(st.SpentEstimate) {
 		st.SpentEstimate++
 	}
-	st.ResetAt = now.Add(time.Duration(data.PointsResetIn * float64(time.Second)))
-	// if reset window is missing (e.g. Limit defaulted above and server
-	// returned 0 seconds), project 1 hour forward so the key isn't stuck
-	if !st.ResetAt.After(now) {
-		st.ResetAt = now.Add(time.Hour)
-	}
+	st.ResetAt = now.Add(clampResetIn(data.PointsResetIn))
 	st.LastRefreshAt = now
 
 	log.Info().
@@ -489,7 +502,7 @@ func (p *Pool) Reconcile(ctx context.Context) {
 			k.SpentEstimate++
 		}
 		if data.PointsResetIn > 0 {
-			k.ResetAt = now.Add(time.Duration(data.PointsResetIn * float64(time.Second)))
+			k.ResetAt = now.Add(clampResetIn(data.PointsResetIn))
 		}
 		k.LastRefreshAt = now
 		k.UsesSinceRefresh = 0

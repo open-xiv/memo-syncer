@@ -471,6 +471,15 @@ func waitForKey(ctx context.Context) (*keypool.Lease, error) {
 		if wait <= 0 {
 			wait = 10 * time.Second
 		}
+		// defensive ceiling: even if a key's ResetAt slipped through the clamp
+		// in pool.go (e.g. a bug or new code path), don't let the loop sleep
+		// for days on end. Re-check Acquire on a sane cadence; the
+		// background Reconcile will have refreshed real state by then.
+		const maxWait = time.Hour
+		if wait > maxWait {
+			log.Warn().Dur("raw_wait", wait).Dur("capped", maxWait).Msg("acquire wait absurdly long; capping")
+			wait = maxWait
+		}
 		log.Warn().Dur("wait", wait).Msg("all keys exhausted, sleeping until reset")
 
 		timer := time.NewTimer(wait)
