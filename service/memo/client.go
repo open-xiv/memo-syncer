@@ -56,7 +56,8 @@ func CreateFight(ctx context.Context, fight *model.Fight) error {
 	}(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, bytes.TrimSpace(respBody))
 	}
 
 	return nil

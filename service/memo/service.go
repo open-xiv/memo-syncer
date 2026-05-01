@@ -407,6 +407,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 		}
 
 		if err := CreateFight(memCtx, fight); err != nil {
+			MemberSyncErrors.Add(1)
 			log.Error().Err(err).
 				Str("member", m.Name+"@"+m.Server).
 				Uint("zone", z.ZoneID).
