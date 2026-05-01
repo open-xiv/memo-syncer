@@ -64,7 +64,7 @@ func main() {
 }
 
 // IdleInterval is how long the sync loop sleeps between complete scans.
-const IdleInterval = 10 * time.Minute
+const IdleInterval = 30 * time.Minute
 
 func runSyncLoop() {
 	for {

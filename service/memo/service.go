@@ -29,7 +29,7 @@ var (
 	MemberQueueSize = 64
 
 	// RecentSyncSkip is how long we skip a member after a successful sync.
-	RecentSyncSkip = time.Hour
+	RecentSyncSkip = 24 * time.Hour
 
 	// PerMemberTimeout bounds a single member's full pipeline
 	// (char_id → best_fights → fight_detail × N → CreateFight × N).
