@@ -1,0 +1,93 @@
+# memo-syncer — singleton (Recreate strategy because we don't want two
+# producers walking the members table at once).
+#
+# Image is rolled by the build-and-deploy workflow; the tag below is just
+# the bootstrap value applied via `kubectl apply` for first install.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memo-syncer
+  namespace: memo
+  labels:
+    app: memo-syncer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: memo-syncer
+  template:
+    metadata:
+      labels:
+        app: memo-syncer
+    spec:
+      containers:
+        - name: app
+          image: ghcr.io/open-xiv/memo-syncer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: GIN_MODE
+              value: release
+            - name: LOG_LEVEL
+              value: info
+          envFrom:
+            - secretRef:
+                name: memo-syncer-env
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memo-syncer
+  namespace: memo
+  labels:
+    app: memo-syncer
+spec:
+  type: ClusterIP
+  selector:
+    app: memo-syncer
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# Picked up by kube-prometheus-stack via release=kube-prom selector.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: memo-syncer
+  namespace: memo
+  labels:
+    release: kube-prom
+spec:
+  selector:
+    matchLabels:
+      app: memo-syncer
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
