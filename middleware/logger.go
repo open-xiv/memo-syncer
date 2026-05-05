@@ -31,9 +31,13 @@ func Logger() gin.HandlerFunc {
 
 		status := c.Writer.Status()
 
-		isProgress := strings.Contains(path, "/progress")
+		// Probe-style endpoints flood logs and crowd out real syncer activity.
+		// Drop them to debug regardless of status (failures still surface via metrics).
+		isProbe := strings.Contains(path, "/progress") ||
+			strings.Contains(path, "/status") ||
+			strings.Contains(path, "/metrics")
 
-		if isProgress {
+		if isProbe {
 			logger = log.Debug()
 		} else {
 			if status >= 500 {
