@@ -27,7 +27,6 @@ func CorsConfig() cors.Config {
 				"http://localhost:5173",
 			}
 
-			// domain check
 			for _, domain := range allowedDomains {
 				if origin == domain {
 					return true
@@ -38,7 +37,6 @@ func CorsConfig() cors.Config {
 				return true
 			}
 
-			// no match -> header check
 			return false
 		},
 

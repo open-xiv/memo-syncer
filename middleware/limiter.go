@@ -17,7 +17,6 @@ func CreateLimiter(limiter *redis_rate.Limiter, limit redis_rate.Limit) gin.Hand
 
 		res, err := limiter.Allow(context.Background(), key, limit)
 		if err != nil {
-			// redis error
 			c.AbortWithStatusJSON(http.StatusInternalServerError, model.ErrorResponse{Error: "Internal server error"})
 			return
 		}

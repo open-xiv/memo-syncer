@@ -21,7 +21,6 @@ func main() {
 	flow.InitDB()
 	flow.InitRedis()
 
-	// one-time reset of stale logs_sync_time timestamps from earlier broken runs
 	if os.Getenv("RESET_STALE_SYNC") == "true" {
 		resetStaleSync()
 	}
@@ -51,10 +50,9 @@ func main() {
 		}
 	}
 
-	// background maintenance: reconcile pool every minute, flush stats every 2
+	// reconcile pool every minute, flush stats every 2
 	go poolMaintenance(ctx)
 
-	// main sync loop
 	go runSyncLoop()
 
 	r := router.SetupRouter()
