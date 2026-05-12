@@ -3,48 +3,40 @@ package memo
 import (
 	"context"
 	"errors"
-	"memo-syncer/flow"
-	"memo-syncer/model"
-	"memo-syncer/service/fflogs"
-	"memo-syncer/service/keypool"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
 
+	"github.com/open-xiv/memo-syncer/flow"
+	"github.com/open-xiv/memo-syncer/model"
+	"github.com/open-xiv/memo-syncer/service/fflogs"
+	"github.com/open-xiv/memo-syncer/service/keypool"
+
 	"github.com/rs/zerolog/log"
 )
 
 var (
-	// Pool is initialized from main.go after DB + Redis are ready.
 	Pool *keypool.Pool
 
-	// WorkerCount is the number of parallel sync workers. Capped regardless
-	// of pool size to avoid overloading FFLogs with too many concurrent
-	// connections per donated key.
+	// capped regardless of pool size to avoid overloading FFLogs with too many concurrent connections per donated key.
 	WorkerCount = 8
 
-	// MemberQueueSize is the buffered channel between producer and workers.
 	MemberQueueSize = 64
 
-	// RecentSyncSkip is how long we skip a member after a successful sync.
 	RecentSyncSkip = 24 * time.Hour
 
-	// PerMemberTimeout bounds a single member's full pipeline
-	// (char_id → best_fights → fight_detail × N → CreateFight × N).
+	// bounds a single member's full pipeline (char_id → best_fights → fight_detail × N → CreateFight × N).
 	PerMemberTimeout = 60 * time.Second
 )
 
-// Progress counters exposed to the /progress handler. All atomic so /progress
-// can read them without locking the scan loop.
 var (
-	TotalMembers   atomic.Int64 // COUNT(*) of members at scan start
-	ExpectedQueued atomic.Int64 // stale+never-synced CN members at scan start (denominator for progress ring)
+	TotalMembers   atomic.Int64
+	ExpectedQueued atomic.Int64
 
-	Walked atomic.Int64 // total walked by producer (includes filtered)
+	Walked atomic.Int64
 
-	// per-scan breakdown of what producer filtered vs queued
 	FilteredNonCN    atomic.Int64
 	FilteredRecent   atomic.Int64
 	Queued           atomic.Int64
@@ -53,25 +45,19 @@ var (
 	FightsUploaded   atomic.Int64
 	MemberSyncErrors atomic.Int64
 
-	LastID atomic.Uint64 // most recently walked member PK
+	LastID atomic.Uint64
 
-	// CurrentMember is the identity of the member the producer is walking
-	// RIGHT NOW. Cached here so /progress can avoid a DB lookup per request.
 	CurrentMember atomic.Pointer[MemberRef]
 
-	// lastScanSnapshot is the frozen result of the most recently completed
-	// scan. nil before the first scan finishes.
 	lastScanSnapshot atomic.Pointer[ScanSnapshot]
 )
 
-// MemberRef is a minimal member identity used by /progress.
 type MemberRef struct {
 	ID     uint
 	Name   string
 	Server string
 }
 
-// ScanSnapshot is a frozen record of a completed scan.
 type ScanSnapshot struct {
 	StartedAt      time.Time
 	FinishedAt     time.Time
@@ -79,23 +65,19 @@ type ScanSnapshot struct {
 	Walked         int64
 	ExpectedQueued int64
 
-	FilteredNonCN    int64
-	FilteredRecent   int64
-	Queued           int64
-	NoFFLogsChar     int64
-	MembersWithData  int64
-	FightsUploaded   int64
-	Errors           int64
+	FilteredNonCN   int64
+	FilteredRecent  int64
+	Queued          int64
+	NoFFLogsChar    int64
+	MembersWithData int64
+	FightsUploaded  int64
+	Errors          int64
 }
 
-// LastScan returns the frozen snapshot of the previous completed scan, or
-// nil if no scan has finished yet.
 func LastScan() *ScanSnapshot {
 	return lastScanSnapshot.Load()
 }
 
-// resetScanCounters zeros all per-scan counters. Called at SyncMembers entry
-// so each scan starts with a clean slate.
 func resetScanCounters() {
 	Walked.Store(0)
 	ExpectedQueued.Store(0)
@@ -110,12 +92,6 @@ func resetScanCounters() {
 	CurrentMember.Store(nil)
 }
 
-// SyncMembers runs a full scan over all members: produces them into a
-// channel, spawns WorkerCount workers that pull members, acquire a key from
-// the pool, fetch FFLogs data, and push fights into memo-server.
-//
-// Transitions the global state to `scanning` on entry and `idle` on return.
-// The main loop is responsible for setting the subsequent NextScanAt.
 func SyncMembers() error {
 	if Pool == nil {
 		return errors.New("memo: key pool not initialized")
@@ -129,19 +105,15 @@ func SyncMembers() error {
 
 	resetScanCounters()
 
-	// count of rows we're about to walk (overall member total)
 	var total int64
 	if err := flow.DB.Model(&model.Member{}).Count(&total).Error; err != nil {
 		return err
 	}
 	TotalMembers.Store(total)
 
-	// pre-compute how many CN members actually need work this pass — this
-	// becomes the honest denominator for the /progress ring. We approximate
-	// "CN" as "server NOT purely ASCII" (same rule as IsNonCNServer) and
-	// "stale" as logs_sync_time IS NULL OR < now() - RecentSyncSkip.
-	//
-	// Uses a raw query because regex ops aren't trivially portable in gorm.
+	// pre-compute the honest denominator for the /progress ring.
+	// "CN" approximated as "server NOT purely ASCII" (same rule as IsNonCNServer); "stale" as logs_sync_time IS NULL OR < now() - RecentSyncSkip.
+	// raw query because regex ops aren't trivially portable in gorm.
 	staleCutoff := time.Now().Add(-RecentSyncSkip)
 	var expected int64
 	if err := flow.DB.Raw(`
@@ -162,7 +134,6 @@ func SyncMembers() error {
 
 	memberCh := make(chan model.Member, MemberQueueSize)
 
-	// producer
 	var prodErr error
 	var prodWg sync.WaitGroup
 	prodWg.Add(1)
@@ -172,7 +143,6 @@ func SyncMembers() error {
 		prodErr = produceMembers(ctx, memberCh)
 	}()
 
-	// workers
 	var workerWg sync.WaitGroup
 	for i := 0; i < WorkerCount; i++ {
 		workerWg.Add(1)
@@ -185,8 +155,6 @@ func SyncMembers() error {
 	workerWg.Wait()
 	prodWg.Wait()
 
-	// freeze the final counter values into an immutable snapshot so /progress
-	// can still surface "what did the last scan do" during idle.
 	finishedAt := time.Now()
 	snap := &ScanSnapshot{
 		StartedAt:       scanStart,
@@ -215,18 +183,14 @@ func SyncMembers() error {
 		Int64("with_data", snap.MembersWithData).
 		Int64("fights_uploaded", snap.FightsUploaded).
 		Int64("errors", snap.Errors).
-		Dur("duration", time.Since(scanStart)).
+		Dur("duration_ms", time.Since(scanStart)).
 		Msg("scan completed")
 
-	// clear current-member cache now that nothing is being walked
 	CurrentMember.Store(nil)
 
 	return prodErr
 }
 
-// produceMembers walks `members` by ID in batches and pushes candidates onto
-// memberCh. Candidates are filtered here (recent sync, server check) so
-// workers see only real work.
 func produceMembers(ctx context.Context, out chan<- model.Member) error {
 	var lastID uint
 	batchSize := 1000
@@ -286,9 +250,6 @@ const (
 	filterRecent
 )
 
-// filterReason returns why this member should be skipped, or filterKeep to
-// queue it for the workers. Split out from the old shouldSync so the
-// producer can bump per-reason counters instead of a single "skipped".
 func filterReason(m model.Member) filterResult {
 	if m.LogsSyncTime != nil && time.Since(*m.LogsSyncTime) < RecentSyncSkip {
 		return filterRecent
@@ -299,8 +260,7 @@ func filterReason(m model.Member) filterResult {
 	return filterKeep
 }
 
-// IsNonCNServer reports whether the server name is purely ASCII — CN servers
-// are always Chinese characters, so an ASCII-only name means EN/JP/etc.
+// IsNonCNServer reports whether the server name is purely ASCII — CN servers are always Chinese characters, so an ASCII-only name means EN/JP/etc.
 func IsNonCNServer(s string) bool {
 	for _, r := range s {
 		if r > unicode.MaxASCII {
@@ -310,9 +270,6 @@ func IsNonCNServer(s string) bool {
 	return true
 }
 
-// runWorker consumes members from memberCh until the channel is closed, and
-// delegates each member to syncOneMember. A per-member recover keeps a panic
-// isolated to one member instead of killing the whole worker goroutine.
 func runWorker(ctx context.Context, id int, in <-chan model.Member) {
 	for {
 		select {
@@ -341,20 +298,15 @@ func runWorker(ctx context.Context, id int, in <-chan model.Member) {
 	}
 }
 
-// syncOneMember runs the full FFLogs → memo-server pipeline for a single
-// member. Acquires a lease from the pool, and on FFLogs rate-limit exhaustion
-// sleeps until the pool reports it's recovered.
 func syncOneMember(ctx context.Context, m model.Member) error {
 	memCtx, cancel := context.WithTimeout(ctx, PerMemberTimeout)
 	defer cancel()
 
-	// 1. acquire a key (may sleep until a key becomes available)
 	lease, err := waitForKey(memCtx)
 	if err != nil {
 		return err
 	}
 
-	// 2. resolve character id (Redis cache first)
 	charID, err := fflogs.ResolveCharacterID(memCtx, lease.Client, m.Name, m.Server, "cn")
 	if err != nil {
 		MemberSyncErrors.Add(1)
@@ -362,14 +314,12 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 		return err
 	}
 	if charID == 0 {
-		// character doesn't exist on fflogs — mark member as "synced" so we
-		// don't re-query for RecentSyncSkip
+		// no fflogs character — mark as "synced" so we don't re-query for RecentSyncSkip
 		MembersNoCharID.Add(1)
 		markSynced(m)
 		return nil
 	}
 
-	// 3. batch-fetch best fights for all zones in one query
 	enc := [4]int{}
 	for i, z := range InterestZones {
 		enc[i] = z.LogsID
@@ -381,9 +331,6 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 		return err
 	}
 
-	// 4. per-zone: if a parse exists, fetch detail and POST to memo-server
-	// Note: each fight_detail is still one FFLogs call, so we keep using the
-	// same lease but report the extra cost so the pool can account for it.
 	uploadedZones := 0
 	for i, z := range InterestZones {
 		rank := best.Zone(i)
@@ -419,8 +366,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 		uploadedZones++
 	}
 
-	// extra debit: each zone that had data costs ~10 points for fight_detail,
-	// on top of the pre-debited 20 for char_id + best_fights. Correct the pool.
+	// extra debit: each zone with data costs ~10 points for fight_detail, on top of the pre-debited 20 for char_id + best_fights.
 	zonesWithData := 0
 	for i := range InterestZones {
 		if r := best.Zone(i); r != nil && len(r.Ranks) > 0 {
@@ -442,9 +388,7 @@ func syncOneMember(ctx context.Context, m model.Member) error {
 }
 
 // waitForKey blocks until the pool hands out a lease or the context expires.
-// On exhaustion it sleeps until the earliest key reset returned by Acquire,
-// and flips the global state to `waiting_for_keys` while blocked so /progress
-// can surface the condition.
+// flips the global state to `waiting_for_keys` while blocked so /progress can surface the condition.
 func waitForKey(ctx context.Context) (*keypool.Lease, error) {
 	blockedOnce := false
 	defer func() {
@@ -462,7 +406,6 @@ func waitForKey(ctx context.Context) (*keypool.Lease, error) {
 			return nil, err
 		}
 
-		// ErrAllExhausted — wait until the earliest reset or ctx deadline
 		if !blockedOnce {
 			markWaitingForKeys(+1, resetAt)
 			blockedOnce = true
@@ -472,21 +415,18 @@ func waitForKey(ctx context.Context) (*keypool.Lease, error) {
 		if wait <= 0 {
 			wait = 10 * time.Second
 		}
-		// defensive ceiling: even if a key's ResetAt slipped through the clamp
-		// in pool.go (e.g. a bug or new code path), don't let the loop sleep
-		// for days on end. Re-check Acquire on a sane cadence; the
-		// background Reconcile will have refreshed real state by then.
+		// defensive ceiling: if a key's ResetAt slipped through the clamp in pool.go, don't sleep for days.
+		// re-check Acquire on a sane cadence; Reconcile will have refreshed real state by then.
 		const maxWait = time.Hour
 		if wait > maxWait {
-			log.Warn().Dur("raw_wait", wait).Dur("capped", maxWait).Msg("acquire wait absurdly long; capping")
+			log.Warn().Dur("raw_wait_ms", wait).Dur("capped_ms", maxWait).Msg("acquire wait absurdly long; capping")
 			wait = maxWait
 		}
-		log.Warn().Dur("wait", wait).Msg("all keys exhausted, sleeping until reset")
+		log.Warn().Dur("wait_ms", wait).Msg("all keys exhausted, sleeping until reset")
 
 		timer := time.NewTimer(wait)
 		select {
 		case <-timer.C:
-			// loop and try again
 		case <-ctx.Done():
 			timer.Stop()
 			return nil, ctx.Err()
@@ -494,7 +434,6 @@ func waitForKey(ctx context.Context) (*keypool.Lease, error) {
 	}
 }
 
-// classifyAndMark inspects an FFLogs error and tells the pool how to react.
 func classifyAndMark(lease *keypool.Lease, err error) {
 	if err == nil {
 		return
@@ -510,8 +449,6 @@ func classifyAndMark(lease *keypool.Lease, err error) {
 	}
 }
 
-// markSynced updates logs_sync_time so the next scan skips this member for
-// RecentSyncSkip.
 func markSynced(m model.Member) {
 	now := time.Now()
 	err := flow.DB.Model(&model.Member{}).

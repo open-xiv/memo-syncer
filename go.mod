@@ -1,8 +1,6 @@
-module memo-syncer
+module github.com/open-xiv/memo-syncer
 
-go 1.24.0
-
-toolchain go1.24.12
+go 1.24.12
 
 require (
 	github.com/gin-contrib/cors v1.7.6
@@ -14,7 +12,6 @@ require (
 	github.com/rs/zerolog v1.34.0
 	golang.org/x/net v0.47.0
 	golang.org/x/oauth2 v0.34.0
-	golang.org/x/time v0.12.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

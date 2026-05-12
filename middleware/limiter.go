@@ -3,8 +3,9 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"memo-syncer/model"
 	"net/http"
+
+	"github.com/open-xiv/memo-syncer/model"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis_rate/v10"

@@ -1,9 +1,10 @@
 package flow
 
 import (
-	"memo-syncer/model"
 	"os"
 	"time"
+
+	"github.com/open-xiv/memo-syncer/model"
 
 	"github.com/rs/zerolog/log"
 	"gorm.io/driver/postgres"
@@ -17,7 +18,7 @@ func InitDB() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "host=localhost user=postgres password=postgres dbname=fight_memo port=5432 sslmode=disable TimeZone=UTC"
-		log.Warn().Msgf("DATABASE_URL not set, using %v", dsn)
+		log.Warn().Msg("DATABASE_URL not set, using local default")
 	}
 
 	var err error

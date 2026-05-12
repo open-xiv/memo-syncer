@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"memo-syncer/model"
-	"memo-syncer/version"
 	"net/http"
 	"os"
 	"sync"
+
+	"github.com/open-xiv/memo-syncer/model"
+	"github.com/open-xiv/memo-syncer/version"
 
 	"golang.org/x/net/http2"
 )

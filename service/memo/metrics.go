@@ -1,22 +1,13 @@
 package memo
 
 import (
-	"memo-syncer/service/keypool"
+	"github.com/open-xiv/memo-syncer/service/keypool"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// init registers Prometheus collectors backed by the existing in-memory atomics
-// + keypool summary. Using *Func collectors so the read happens lazily on
-// scrape — no extra writes on the hot path.
-//
-// Naming: `syncer_*` for current-scan state (resets between scans, sawtooth
-// shape on Grafana), `syncer_last_scan_*` for the frozen snapshot of the
-// previous completed scan, `syncer_keypool_*` for FFLogs key pool state, and
-// `syncer_workers_waiting` for the live "blocked on key acquire" count.
 func init() {
-	// ── current scan state (gauges; reset to 0 each scan, climb during) ──
 	promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "syncer_total_members",
 		Help: "members table COUNT(*) snapshot at scan start (denominator)",
@@ -67,7 +58,6 @@ func init() {
 		Help: "per-member sync errors (FFLogs / memo-server / DB) in current scan",
 	}, func() float64 { return float64(MemberSyncErrors.Load()) })
 
-	// ── last completed scan snapshot (gauges; stable between scans) ──
 	promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "syncer_last_scan_duration_seconds",
 		Help: "duration of the most recently completed scan",
@@ -99,7 +89,6 @@ func init() {
 		return float64(s.Errors)
 	})
 
-	// ── FFLogs key pool ──
 	promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "syncer_keypool_total",
 		Help: "total FFLogs keys loaded",
@@ -159,7 +148,6 @@ func init() {
 		return float64(s.EarliestReset.Unix())
 	})
 
-	// ── workers ──
 	promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "syncer_workers_total",
 		Help: "configured worker pool size",
@@ -170,6 +158,5 @@ func init() {
 		Help: "workers currently blocked on key acquisition",
 	}, func() float64 { return float64(stateStore.waitingCount.Load()) })
 
-	// ensure keypool import is materialized even if unused above (defensive)
 	_ = keypool.ErrAllExhausted
 }

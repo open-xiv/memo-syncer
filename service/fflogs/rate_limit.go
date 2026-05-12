@@ -12,10 +12,8 @@ query {
 }
 `
 
-// RateLimitData mirrors FFLogs' rateLimitData payload. All three fields
-// come back as JSON numbers with fractional parts (e.g. pointsSpentThisHour
-// can be `26.05`), so they must be float64 on the Go side. Integer casts
-// happen at the KeyState boundary in the pool.
+// RateLimitData mirrors FFLogs' rateLimitData payload.
+// all three fields come back as JSON numbers with fractional parts (e.g. pointsSpentThisHour can be 26.05), so they must be float64. integer casts happen at the KeyState boundary.
 type RateLimitData struct {
 	LimitPerHour        float64 `json:"limitPerHour"`
 	PointsSpentThisHour float64 `json:"pointsSpentThisHour"`
