@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"memo-syncer/metrics"
+	"github.com/open-xiv/memo-syncer/metrics"
 
 	"github.com/gin-gonic/gin"
 )

@@ -1,8 +1,5 @@
-# memo-syncer — singleton (Recreate strategy because we don't want two
-# producers walking the members table at once).
-#
-# Image is rolled by the build-and-deploy workflow; the tag below is just
-# the bootstrap value applied via `kubectl apply` for first install.
+# memo-syncer — singleton (Recreate strategy because we don't want two producers walking the members table at once).
+# image is rolled by the build-and-deploy workflow; the tag below is just the bootstrap value applied via `kubectl apply` for first install.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,18 +33,20 @@ spec:
               value: release
             - name: LOG_LEVEL
               value: info
+            - name: MEMO_ENV
+              value: prod
           envFrom:
             - secretRef:
                 name: memo-syncer-env
           readinessProbe:
             httpGet:
-              path: /status
+              path: /status/ready
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /status
+              path: /status/live
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 30
@@ -75,7 +74,7 @@ spec:
       port: 8080
       targetPort: 8080
 ---
-# Picked up by kube-prometheus-stack via release=kube-prom selector.
+# picked up by kube-prometheus-stack via release=kube-prom selector.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

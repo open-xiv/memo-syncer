@@ -1,19 +1,19 @@
 package api
 
 import (
-	"memo-syncer/flow"
-	"memo-syncer/model"
-	"memo-syncer/service/memo"
 	"net/http"
 	"strings"
+
+	"github.com/open-xiv/memo-syncer/flow"
+	"github.com/open-xiv/memo-syncer/model"
+	"github.com/open-xiv/memo-syncer/service/memo"
 
 	"github.com/gin-gonic/gin"
 )
 
-// GetProgress returns the live progress payload. The shape is defined in
-// /openapi.yaml — if you change it, update the spec file in the same commit.
+// GetProgress returns the live progress payload. shape is defined in /openapi.yaml.
 func GetProgress(c *gin.Context) {
-	// /progress is a live counter; browsers should NEVER cache it.
+	// /progress is a live counter; browsers should not cache it.
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	c.Header("Pragma", "no-cache")
 	c.Header("Expires", "0")
@@ -113,7 +113,6 @@ func buildKeyStats() *model.KeyStatsResponse {
 	return resp
 }
 
-// GetMemberProgress returns metadata for a single member by `name@server`.
 func GetMemberProgress(c *gin.Context) {
 	raw := c.Param("name")
 

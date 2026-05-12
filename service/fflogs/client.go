@@ -12,9 +12,8 @@ const (
 	APIURL   = "https://www.fflogs.com/api/v2/client"
 )
 
-// Client wraps an authenticated FFLogs v2 GraphQL client tied to a single
-// (clientID, clientSecret) pair. The keypool constructs one per donated key
-// and reuses it so the OAuth token stays cached inside the transport.
+// Client wraps an authenticated FFLogs v2 GraphQL client tied to a single (clientID, clientSecret) pair.
+// the keypool constructs one per donated key and reuses it so the OAuth token stays cached inside the transport.
 type Client struct {
 	graphql *graphql.Client
 }

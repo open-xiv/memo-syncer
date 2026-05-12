@@ -2,18 +2,21 @@ package main
 
 import (
 	"context"
-	"memo-syncer/flow"
-	"memo-syncer/logger"
-	"memo-syncer/model"
-	"memo-syncer/router"
-	"memo-syncer/service/keypool"
-	"memo-syncer/service/memo"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/open-xiv/memo-syncer/flow"
+	"github.com/open-xiv/memo-syncer/logger"
+	"github.com/open-xiv/memo-syncer/model"
+	"github.com/open-xiv/memo-syncer/router"
+	"github.com/open-xiv/memo-syncer/service/keypool"
+	"github.com/open-xiv/memo-syncer/service/memo"
+
 	"github.com/rs/zerolog/log"
 )
+
+const IdleInterval = 30 * time.Minute
 
 func main() {
 	logger.InitLogger()
@@ -25,7 +28,6 @@ func main() {
 		resetStaleSync()
 	}
 
-	// build the FFLogs key pool (donated keys + optional env fallback)
 	ctx := context.Background()
 	memo.Pool = keypool.New()
 	if err := memo.Pool.Load(ctx); err != nil {
@@ -43,16 +45,13 @@ func main() {
 		}
 	}
 
-	// let tunables be overridden by env without a rebuild
 	if v := os.Getenv("SYNCER_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			memo.WorkerCount = n
 		}
 	}
 
-	// reconcile pool every minute, flush stats every 2
 	go poolMaintenance(ctx)
-
 	go runSyncLoop()
 
 	r := router.SetupRouter()
@@ -60,9 +59,6 @@ func main() {
 		log.Fatal().Msgf("failed to run server: %v", err)
 	}
 }
-
-// IdleInterval is how long the sync loop sleeps between complete scans.
-const IdleInterval = 30 * time.Minute
 
 func runSyncLoop() {
 	for {

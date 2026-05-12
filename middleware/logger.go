@@ -16,8 +16,7 @@ func Logger() gin.HandlerFunc {
 
 		c.Next()
 
-		stop := time.Now()
-		latency := stop.Sub(start)
+		latency := time.Since(start)
 		if raw != "" {
 			path = path + "?" + raw
 		}
@@ -27,33 +26,25 @@ func Logger() gin.HandlerFunc {
 			errMsg = c.Errors.String()
 		}
 
-		logger := log.Info()
-
 		status := c.Writer.Status()
+		isProbe := strings.HasPrefix(path, "/status") || strings.HasPrefix(path, "/metrics")
 
-		// Probe-style endpoints flood logs and crowd out real syncer activity.
-		// Drop them to debug regardless of status (failures still surface via metrics).
-		isProbe := strings.Contains(path, "/progress") ||
-			strings.Contains(path, "/status") ||
-			strings.Contains(path, "/metrics")
-
-		if isProbe {
+		var logger = log.Info()
+		switch {
+		case isProbe:
 			logger = log.Debug()
-		} else {
-			if status >= 500 {
-				logger = log.Error().Str("error", errMsg)
-			} else if status >= 400 {
-				logger = log.Warn().Str("error", errMsg)
-			} else {
-				logger = log.Info()
-			}
+		case status >= 500:
+			logger = log.Error().Str("error", errMsg)
+		case status >= 400:
+			logger = log.Warn().Str("error", errMsg)
 		}
 
-		logger.Str("method", c.Request.Method).
+		logger.
+			Str("method", c.Request.Method).
 			Str("path", path).
-			Int("status", c.Writer.Status()).
+			Int("status", status).
 			Str("ip", c.ClientIP()).
-			Dur("latency", latency).
-			Msg("Request")
+			Dur("latency_ms", latency).
+			Msg("request handled")
 	}
 }

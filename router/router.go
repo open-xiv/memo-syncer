@@ -1,9 +1,9 @@
 package router
 
 import (
-	"memo-syncer/api"
-	"memo-syncer/flow"
-	"memo-syncer/middleware"
+	"github.com/open-xiv/memo-syncer/api"
+	"github.com/open-xiv/memo-syncer/flow"
+	"github.com/open-xiv/memo-syncer/middleware"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -32,6 +32,8 @@ func SetupRouter() *gin.Engine {
 	publicRateLimiter := middleware.CreateLimiter(limiter, publicLimit)
 
 	r.GET("/status", api.Status)
+	r.GET("/status/live", api.StatusLive)
+	r.GET("/status/ready", api.StatusReady)
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	progress := r.Group("/progress")

@@ -1,6 +1,5 @@
 package fflogs
 
-// CharacterID wraps the response of character_id.graphql.
 type CharacterID struct {
 	CharacterData struct {
 		Character struct {
@@ -9,7 +8,6 @@ type CharacterID struct {
 	} `json:"characterData"`
 }
 
-// Rank is the minimal slice of an encounterRankings.ranks[i] we actually read.
 type Rank struct {
 	Report struct {
 		Code    string `json:"code"`
@@ -17,14 +15,11 @@ type Rank struct {
 	} `json:"report"`
 }
 
-// EncounterRanking is a trimmed projection of encounterRankings (FFLogs
-// returns a large JSON blob; we only touch Ranks[0].Report).
 type EncounterRanking struct {
 	Ranks []Rank `json:"ranks"`
 }
 
-// BestFights is the batched response from best_fights.graphql where four
-// zones are fetched in parallel via GraphQL aliases (m1..m4).
+// BestFights is the batched response from best_fights.graphql where four zones are fetched in one query via GraphQL aliases (m1..m4).
 type BestFights struct {
 	CharacterData struct {
 		Character struct {
@@ -51,7 +46,6 @@ func (b *BestFights) Zone(i int) *EncounterRanking {
 	return nil
 }
 
-// FightDetail wraps the response of fight_detail.graphql.
 type FightDetail struct {
 	ReportData struct {
 		Report struct {

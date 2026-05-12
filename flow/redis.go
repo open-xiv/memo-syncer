@@ -18,7 +18,7 @@ func InitRedis() {
 	url := os.Getenv("REDIS_URL")
 	if url == "" {
 		url = "redis://localhost:6379"
-		log.Warn().Msgf("REDIS_URL not set, using %s", url)
+		log.Warn().Msg("REDIS_URL not set, using local default")
 	}
 
 	opts, err := redis.ParseURL(url)

@@ -3,27 +3,22 @@ package fflogs
 import (
 	"context"
 	"errors"
-	"memo-syncer/flow"
-	"memo-syncer/model"
-	"memo-syncer/util"
 	"strconv"
 	"time"
+
+	"github.com/open-xiv/memo-syncer/flow"
+	"github.com/open-xiv/memo-syncer/model"
+	"github.com/open-xiv/memo-syncer/util"
 
 	"github.com/redis/go-redis/v9"
 )
 
-// CharIDCacheTTL is how long a resolved FFLogs character ID is remembered in
-// Redis. The ID itself never changes, so the only reason to expire is to let
-// deleted / renamed characters self-heal.
+// the character ID never changes, so the only reason to expire is to let deleted / renamed characters self-heal.
 const CharIDCacheTTL = 30 * 24 * time.Hour
 
-// ErrNoProgress is returned by BuildMemberZoneProgress when FFLogs has no
-// parse for the requested (charID, encounterID).
 var ErrNoProgress = errors.New("fflogs: no progress for zone")
 
-// ResolveCharacterID returns the character ID for (name, server, region),
-// consulting Redis first. Cache hits skip the FFLogs round trip entirely.
-// Writes back to Redis on a successful lookup.
+// ResolveCharacterID returns the character ID for (name, server, region), consulting Redis first.
 func ResolveCharacterID(ctx context.Context, c *Client, name, server, region string) (int, error) {
 	key := charIDCacheKey(name, server, region)
 
@@ -51,10 +46,8 @@ func charIDCacheKey(name, server, region string) string {
 	return "fflogs:char:" + region + ":" + name + "@" + server
 }
 
-// BuildMemberZoneProgress takes the result of a single aliased best-fight
-// ranking and follows through to fight_detail, returning the fight ready for
-// upload. Returns ErrNoProgress when the member has no kills in that zone or
-// the underlying report is incomplete.
+// BuildMemberZoneProgress follows through from a single aliased best-fight ranking to fight_detail, returning the fight ready for upload.
+// returns ErrNoProgress when the member has no kills in that zone or the underlying report is incomplete.
 func BuildMemberZoneProgress(ctx context.Context, c *Client, rank *EncounterRanking) (*model.Fight, error) {
 	if rank == nil || len(rank.Ranks) == 0 {
 		return nil, ErrNoProgress
@@ -75,8 +68,8 @@ func BuildMemberZoneProgress(ctx context.Context, c *Client, rank *EncounterRank
 	return fight, nil
 }
 
-// GroupServer builds a name→server map from report.masterData.actors (fight
-// Composition entries don't carry server info, so we have to cross-reference).
+// GroupServer builds a name→server map from report.masterData.actors.
+// fight Composition entries don't carry server info, so we have to cross-reference.
 func GroupServer(fight FightDetail) map[string]string {
 	nameToServer := make(map[string]string)
 	for _, actor := range fight.ReportData.Report.MasterData.Actors {
@@ -96,13 +89,11 @@ func GroupDeath(fight FightDetail) map[string]int {
 }
 
 // MapToMemo translates a FFLogs fight report into the memo-server Fight DTO.
-// Returns nil when the report is incomplete (empty fights or empty composition)
-// — the caller should treat nil the same as ErrNoProgress and skip the member.
+// returns nil when the report is incomplete; the caller should treat nil the same as ErrNoProgress.
 func MapToMemo(detail FightDetail) *model.Fight {
 	report := detail.ReportData.Report
 
-	// defensive checks: FFLogs may return rankings that point to a deleted or
-	// partially-indexed report, in which case Fights[] or Composition[] is empty.
+	// FFLogs may return rankings pointing to a deleted or partially-indexed report, leaving Fights[] or Composition[] empty.
 	if len(report.Fights) == 0 {
 		return nil
 	}
@@ -140,10 +131,8 @@ func MapToMemo(detail FightDetail) *model.Fight {
 
 		Clear: isClear,
 		Progress: model.Progress{
-			Phase:     0,
-			PhaseName: "", // FFLogs doesn't expose engine-side phase names
-			EnemyID:   uint(first.EncounterID),
-			EnemyHp:   enemyHP,
+			EnemyID: uint(first.EncounterID),
+			EnemyHp: enemyHP,
 		},
 	}
 }
