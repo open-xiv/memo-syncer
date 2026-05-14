@@ -41,7 +41,11 @@ var (
 	// wait after phase 1 before starting phase 2 retries, giving FFLogs' OAuth rate window time to reset.
 	ProbeRetryCooldown = 10 * time.Second
 
-	// logs_keys rows at or above this err_count are treated as permanently broken — Load skips them, probe/MarkError bump straight here on invalid_client.
+	// logs_keys rows at or above this err_count are treated as permanently broken — Load skips them.
+	// err_count reflects consecutive failures since the last success (see KeyState.ErrCount),
+	// so crossing the threshold means a key has failed N times in a row without ever recovering.
+	// the threshold is also a runtime kill switch: MarkError disables the key inline once reached.
+	// forbidInDB writes this value directly for unambiguously permanent errors (invalid_client / 401 / 403).
 	ForbiddenErrThreshold = uint(100)
 
 	// cap on the reset-window duration we accept from FFLogs.
@@ -158,7 +162,8 @@ func (p *Pool) Load(ctx context.Context) error {
 					return ctx.Err()
 				}
 			}
-			// re-arm so probe can flip Disabled back on success; ErrCount stays (it reflects the failed attempt).
+			// re-arm so probe can flip Disabled back on success. probe itself resets ErrCount on success
+			// (consecutive-failure semantics), so a phase-2 success effectively forgets the phase-1 failure.
 			st.Disabled = false
 			p.probe(ctx, st)
 		}
@@ -220,6 +225,9 @@ func (p *Pool) probe(ctx context.Context, st *KeyState) {
 	}
 
 	st.Disabled = false
+	// success resets the consecutive-failure counter so a key that had transient hiccups
+	// stops drifting toward the forbidden threshold.
+	st.ErrCount = 0
 
 	now := time.Now()
 	st.Limit = int(data.LimitPerHour)
@@ -337,11 +345,13 @@ func (p *Pool) Acquire() (*Lease, time.Time, error) {
 }
 
 // Release settles a successful lease. extraCost adjusts the estimate up or down when the caller knows the actual cost.
+// success here resets ErrCount — it's the consecutive-failure counter, so any prior streak is broken.
 func (p *Pool) Release(lease *Lease, extraCost int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	st := lease.State
+	st.ErrCount = 0
 	if extraCost != 0 {
 		st.SpentEstimate += extraCost
 		if st.SpentEstimate < 0 {
@@ -359,6 +369,9 @@ const (
 )
 
 // MarkError reports a per-lease failure. the lease is spent — the caller should not use its client again.
+// per consecutive-failure semantics, ErrCount accumulates only across UNBROKEN failure runs;
+// any Release in between resets it. Reaching ForbiddenErrThreshold here means N failures in a row,
+// strong enough evidence to disable the key inline and forbid it in DB so the next Load skips it.
 func (p *Pool) MarkError(lease *Lease, kind ErrorKind) {
 	p.mu.Lock()
 	st := lease.State
@@ -378,6 +391,16 @@ func (p *Pool) MarkError(lease *Lease, kind ErrorKind) {
 		log.Warn().Uint("key_id", st.ID).Msg("key unauthorized, marking forbidden")
 
 	case ErrTransient:
+	}
+
+	if !forbid && st.ErrCount >= ForbiddenErrThreshold {
+		st.Disabled = true
+		st.CooldownUntil = time.Now().Add(DisabledCooldown)
+		forbid = true
+		log.Warn().
+			Uint("key_id", st.ID).
+			Uint("err_count", st.ErrCount).
+			Msg("key hit consecutive-failure threshold, marking forbidden")
 	}
 
 	keyID := st.ID
@@ -432,27 +455,35 @@ func (p *Pool) Reconcile(ctx context.Context) {
 		}
 		k.LastRefreshAt = now
 		k.UsesSinceRefresh = 0
+		// successful reconcile counts as a successful FFLogs interaction → break any prior failure streak.
+		k.ErrCount = 0
 		p.mu.Unlock()
 	}
 }
 
-// FlushStats persists in-memory UseCount / ErrCount increments back to logs_keys, then zeros the local counters.
+// FlushStats persists in-memory counters back to logs_keys.
+// use_count is a lifetime monotonic counter, so we flush its delta and zero the local accumulator.
+// err_count is the current consecutive-failure run (see KeyState.ErrCount), so we write the absolute
+// value and leave the local field alone — it stays as the live counter for the next acquire/release cycle.
 func (p *Pool) FlushStats(ctx context.Context) {
 	p.mu.Lock()
 	type pending struct {
 		id       uint
 		useDelta uint
-		errDelta uint
+		errAbs   uint
 	}
 	var batch []pending
 	for _, k := range p.keys {
 		if k.ID == 0 {
 			continue
 		}
-		if k.UseCount == 0 && k.ErrCount == 0 {
+		// skip rows with no activity since last flush. err_count alone changing without any use
+		// (e.g. a Reconcile probe failure) waits until a normal lease cycle bumps UseCount,
+		// at which point the absolute err_count will be persisted alongside.
+		if k.UseCount == 0 {
 			continue
 		}
-		batch = append(batch, pending{id: k.ID, useDelta: k.UseCount, errDelta: k.ErrCount})
+		batch = append(batch, pending{id: k.ID, useDelta: k.UseCount, errAbs: k.ErrCount})
 	}
 	p.mu.Unlock()
 
@@ -463,7 +494,7 @@ func (p *Pool) FlushStats(ctx context.Context) {
 			Where("id = ?", b.id).
 			Updates(map[string]any{
 				"use_count":   gorm.Expr("use_count + ?", b.useDelta),
-				"err_count":   gorm.Expr("err_count + ?", b.errDelta),
+				"err_count":   b.errAbs,
 				"last_use_at": now,
 			}).Error
 		if err != nil {
@@ -477,9 +508,8 @@ func (p *Pool) FlushStats(ctx context.Context) {
 				if k.UseCount >= b.useDelta {
 					k.UseCount -= b.useDelta
 				}
-				if k.ErrCount >= b.errDelta {
-					k.ErrCount -= b.errDelta
-				}
+				// ErrCount left as-is: it's the live consecutive-failure counter,
+				// not a delta to be drained.
 				break
 			}
 		}

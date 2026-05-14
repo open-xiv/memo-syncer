@@ -19,7 +19,12 @@ type KeyState struct {
 	LastRefreshAt    time.Time
 	UsesSinceRefresh uint
 	UseCount         uint
-	ErrCount         uint
+	// ErrCount is the current run of consecutive FFLogs failures since the
+	// last successful interaction (lease release / probe / reconcile).
+	// it resets to 0 on every success and increments on every failure.
+	// reaching ForbiddenErrThreshold triggers a runtime disable + DB write so
+	// the key is filtered out at next Pool.Load.
+	ErrCount uint
 
 	Disabled      bool
 	Forbidden     bool
