@@ -6,44 +6,125 @@ info:
     members by querying FFLogs v2 and pushing normalized fight records to
     memo-server.
 
-    The syncer runs a scan loop every ~10 minutes. Each scan walks every
+    The syncer runs a scan loop on a regular cadence. Each scan walks every
     member row in the shared `members` table, filters out non-CN and
     recently-synced rows, then has 8 workers fetch FFLogs data for the
     rest and POST the results to memo-server.
 
-    This document covers the observability endpoints exposed by the
-    syncer itself. Write traffic (POST /fight/) targets `memo-server` and
-    is documented in that service's spec.
+    This document covers the HTTP surface exposed by the syncer itself
+    (health probes, Prometheus metrics, sync progress). Write traffic
+    (POST /fight/) targets `memo-server` and is documented in that
+    service's spec.
+
+    No client authentication. The endpoints are gated by the k3s
+    NetworkPolicy + ingress: status probes are kubelet-only; `/progress/*`
+    is reachable through cluster-us when explicitly exposed. `/progress/*`
+    is rate-limited at 800 req/min/IP via Redis (returns 429 + JSON error
+    on exceedance).
   version: 1.0.0
 
 servers:
-  - url: https://memo-sync.fly.dev
+  - url: http://memo-syncer.memo.svc.cluster.local:8080
+    description: |
+      In-cluster ClusterIP on k3s (droplet-us). No public ingress —
+      reachable via port-forward, sibling pods in the `memo` namespace,
+      or the WG `mesh0` overlay.
 
 tags:
   - name: status
   - name: progress
 
 paths:
+  # ── Status ──
   /status:
     get:
       tags: [status]
-      summary: Liveness check
+      summary: Health snapshot
+      description: |
+        Human / Grafana / cross-service consumption. Runs the dep probes
+        (db + redis ping) inline on every call — traffic is infrequent
+        enough that caching isn't worth the staleness. Returns 503 with
+        the same body shape when any check is failing.
       operationId: getStatus
       responses:
         "200":
-          description: OK
+          description: All checks pass
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+        "503":
+          description: One or more checks failing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+
+  /status/live:
+    get:
+      tags: [status]
+      summary: Kubelet liveness probe
+      description: |
+        Returns 200 with `{"status":"ok"}` iff the process can answer HTTP.
+        No dependency checks — a failure here restarts the pod, so
+        transient dep outages must not propagate.
+      operationId: getStatusLive
+      responses:
+        "200":
+          description: Process is alive
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
 
+  /status/ready:
+    get:
+      tags: [status]
+      summary: Kubelet readiness probe
+      description: |
+        Returns 200 iff every dep check (database, redis) passes; otherwise
+        503. Runs the probes inline — there is no cached snapshot in this
+        service. Failing readiness pulls the pod from service endpoints
+        but does not restart it.
+      operationId: getStatusReady
+      responses:
+        "200":
+          description: All deps healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "503":
+          description: A dep check is failing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  /metrics:
+    get:
+      tags: [status]
+      summary: Prometheus metrics
+      description: Exposition-format metrics for the Prometheus scraper.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ── Progress ──
   /progress/:
     get:
       tags: [progress]
       summary: Live sync progress + pool health
       description: |
         Returns a snapshot of the sync loop. The response is always
-        `Cache-Control: no-store` so frontends can poll it freely.
+        `Cache-Control: no-store` so frontends can poll it freely — any
+        intermediary cache would smear the live counters. Rate-limited at
+        800 req/min/IP.
 
         ### Typical usage for a progress-ring UI
         - Ring fill while scanning:
@@ -187,20 +268,22 @@ paths:
                       total_limit: 113000
                       total_remaining: 0
                       earliest_reset: "2026-04-15T23:22:37Z"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /progress/{name}:
     get:
       tags: [progress]
       summary: Per-member sync metadata
-      description: Returns the last successful sync time for a single member.
+      description: |
+        Returns the last successful FFLogs sync time for a single member.
+        Used by the uploader UI to tell a player whether their public
+        profile is up to date. Rate-limited at 800 req/min/IP.
       operationId: getMemberProgress
       parameters:
-        - name: name
-          in: path
-          required: true
-          description: "Format: `name@server` (URL-encoded if the name contains Unicode)."
-          schema:
-            type: string
+        - $ref: "#/components/parameters/MemberName"
       responses:
         "200":
           description: OK
@@ -212,8 +295,45 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
 components:
+  parameters:
+    MemberName:
+      name: name
+      in: path
+      required: true
+      description: "Format: `name@server` (URL-encoded if the name contains Unicode)."
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TooManyRequests:
+      description: Rate limit exceeded (800 req/min/IP)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
   schemas:
     StatusResponse:
       type: object
@@ -221,7 +341,59 @@ components:
       properties:
         status:
           type: string
-          example: OK
+          description: "`ok` / `down`"
+
+    HealthCheck:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        latency_ms:
+          type: integer
+          format: int64
+        error:
+          type: string
+
+    HealthSnapshot:
+      type: object
+      required:
+        - service
+        - version
+        - build
+        - env
+        - started_at
+        - uptime_seconds
+        - status
+        - checks
+      description: |
+        Unlike memo-server's cached snapshot, the syncer runs dep probes
+        inline on every `/status` call — traffic is infrequent enough that
+        a cache layer isn't worth the staleness. So there is no `as_of`
+        field; the body is always live.
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        build:
+          type: string
+        env:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: integer
+          format: int64
+        status:
+          type: string
+          description: "`ok` (all checks pass) / `down` (a check failed; HTTP also returns 503)"
+        checks:
+          type: object
+          description: Keyed by dep name (`database`, `redis`).
+          additionalProperties:
+            $ref: "#/components/schemas/HealthCheck"
 
     ProgressResponse:
       type: object
@@ -248,14 +420,12 @@ components:
             - type: "null"
           description: Null before the first scan finishes.
         next_scan_at:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
           description: Only populated when `state == "idle"`.
         keys_recover_at:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
           description: |
             Earliest `ResetAt` among exhausted keys. Only populated when
             `state == "waiting_for_keys"` — the UI can subtract `now` to
@@ -278,9 +448,8 @@ components:
       required: [walked, expected_queued, counters]
       properties:
         started_at:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
         walked:
           type: integer
           format: int64
@@ -293,8 +462,9 @@ components:
           format: int64
           description: |
             Pre-computed denominator — number of CN members that actually
-            need work this scan (stale or never synced). Use as the ring
-            denominator: `counters.queued / expected_queued`.
+            need work this scan (stale or never synced; "stale" =
+            `logs_sync_time` older than the recent-sync window or null).
+            Use as the ring denominator: `counters.queued / expected_queued`.
         at_member:
           oneOf:
             - $ref: "#/components/schemas/MemberRef"
@@ -352,11 +522,11 @@ components:
         filtered_non_cn:
           type: integer
           format: int64
-          description: Skipped because the server is not a CN server (ASCII-only).
+          description: Skipped because the server is not in the CN allowlist.
         filtered_recent:
           type: integer
           format: int64
-          description: Skipped because `logs_sync_time` is within the 1h window.
+          description: Skipped because `logs_sync_time` is within the recent-sync window (currently 24h).
         queued:
           type: integer
           format: int64
@@ -364,7 +534,10 @@ components:
         no_fflogs_char:
           type: integer
           format: int64
-          description: Worker resolved `character_id = 0` — character not on FFLogs.
+          description: |
+            Worker resolved `character_id = 0` — character not on FFLogs.
+            These are still marked synced so we don't re-query for the
+            duration of the recent-sync window.
         members_with_data:
           type: integer
           format: int64
@@ -377,8 +550,10 @@ components:
           type: integer
           format: int64
           description: |
-            Transient FFLogs/network errors. Does NOT count memo-server
-            upload failures (those are logged but not tracked here).
+            Transient FFLogs/network errors plus panics. Does NOT count
+            memo-server upload failures (those are logged but not tracked
+            here so a downstream outage doesn't poison the key health
+            signal).
 
     MemberRef:
       type: object
@@ -387,6 +562,7 @@ components:
         id:
           type: integer
           format: int64
+          description: Internal members.id (stable per row, not exposed elsewhere).
         name:
           type: string
         server:
@@ -398,7 +574,7 @@ components:
       properties:
         count:
           type: integer
-          description: Total worker goroutines (fixed at boot).
+          description: Total worker goroutines (fixed at boot, currently 8 regardless of pool size).
         waiting:
           type: integer
           description: |
@@ -431,10 +607,9 @@ components:
           type: integer
           description: Sum of `max(0, Limit - SpentEstimate)` across active keys.
         earliest_reset:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
-          description: Earliest `ResetAt` among active keys.
+          description: Earliest `ResetAt` among active keys; drives the `keys_recover_at` ETA.
 
     MemberResponse:
       type: object
@@ -445,9 +620,9 @@ components:
         server:
           type: string
         last_sync_time:
-          type: string
+          type: [string, "null"]
           format: date-time
-          nullable: true
+          description: Last successful FFLogs sync; null if the member has never been synced.
 
     ErrorResponse:
       type: object
@@ -457,17 +632,3 @@ components:
           type: string
         details:
           type: string
-
-  responses:
-    BadRequest:
-      description: Bad request
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-    NotFound:
-      description: Not found
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
