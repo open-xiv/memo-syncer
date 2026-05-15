@@ -7,7 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/open-xiv/memo-syncer/flow"
 	"github.com/open-xiv/memo-syncer/model"
@@ -112,15 +111,14 @@ func SyncMembers() error {
 	TotalMembers.Store(total)
 
 	// pre-compute the honest denominator for the /progress ring.
-	// "CN" approximated as "server NOT purely ASCII" (same rule as IsNonCNServer); "stale" as logs_sync_time IS NULL OR < now() - RecentSyncSkip.
-	// raw query because regex ops aren't trivially portable in gorm.
+	// "CN" = server in cnWorlds (same allowlist as IsCNServer); "stale" = logs_sync_time IS NULL OR < now() - RecentSyncSkip.
 	staleCutoff := time.Now().Add(-RecentSyncSkip)
 	var expected int64
 	if err := flow.DB.Raw(`
 		SELECT COUNT(*) FROM members
-		WHERE server !~ '^[A-Za-z0-9 ]+$'
+		WHERE server IN ?
 		  AND (logs_sync_time IS NULL OR logs_sync_time < ?)
-	`, staleCutoff).Scan(&expected).Error; err != nil {
+	`, CNWorldList(), staleCutoff).Scan(&expected).Error; err != nil {
 		log.Warn().Err(err).Msg("expected_queued precount failed; falling back to 0")
 		expected = 0
 	}
@@ -254,20 +252,10 @@ func filterReason(m model.Member) filterResult {
 	if m.LogsSyncTime != nil && time.Since(*m.LogsSyncTime) < RecentSyncSkip {
 		return filterRecent
 	}
-	if IsNonCNServer(m.Server) {
+	if !IsCNServer(m.Server) {
 		return filterNonCN
 	}
 	return filterKeep
-}
-
-// IsNonCNServer reports whether the server name is purely ASCII — CN servers are always Chinese characters, so an ASCII-only name means EN/JP/etc.
-func IsNonCNServer(s string) bool {
-	for _, r := range s {
-		if r > unicode.MaxASCII {
-			return false
-		}
-	}
-	return true
 }
 
 func runWorker(ctx context.Context, id int, in <-chan model.Member) {
