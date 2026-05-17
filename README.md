@@ -1,10 +1,10 @@
-# memo-syncer
+## memo-syncer
 
 后台同步器：从 FFLogs 拉取成员日志，归一化后写入 SuMemo Postgres。常驻进程，闲时挂起后自动续上。
 
 完整 schema 见 [`openapi.yaml`](openapi.yaml)。
 
-## Run
+### Run
 
 ```bash
 cp .env.example .env        # 至少 DATABASE_URL / REDIS_URL；FFLogs key 见下
@@ -12,7 +12,7 @@ go run .
 docker compose up -d        # 起本地 pg / redis
 ```
 
-## Config
+### Config
 
 | env | required | what it tunes |
 |---|---|---|
@@ -28,7 +28,7 @@ docker compose up -d        # 起本地 pg / redis
 
 启动时优先读 `logs_keys` 表里的捐赠 key；表空且 env 未设置则拒绝启动。
 
-## Endpoints
+### Endpoints
 
 | route | response | semantics |
 |---|---|---|
