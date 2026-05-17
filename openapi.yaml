@@ -16,19 +16,14 @@ info:
     (POST /fight/) targets `memo-server` and is documented in that
     service's spec.
 
-    No client authentication. The endpoints are gated by the k3s
-    NetworkPolicy + ingress: status probes are kubelet-only; `/progress/*`
-    is reachable through cluster-us when explicitly exposed. `/progress/*`
-    is rate-limited at 800 req/min/IP via Redis (returns 429 + JSON error
-    on exceedance).
+    No client authentication. Status probes are infrastructure-only;
+    `/progress/*` is reachable on request and is rate-limited via Redis
+    (returns 429 + JSON error on exceedance).
   version: 1.0.0
 
 servers:
-  - url: http://memo-syncer.memo.svc.cluster.local:8080
-    description: |
-      In-cluster ClusterIP on k3s (droplet-us). No public ingress —
-      reachable via port-forward, sibling pods in the `memo` namespace,
-      or the WG `mesh0` overlay.
+  - url: http://localhost:8080
+    description: Local development
 
 tags:
   - name: status
@@ -63,7 +58,7 @@ paths:
   /status/live:
     get:
       tags: [status]
-      summary: Kubelet liveness probe
+      summary: Liveness probe
       description: |
         Returns 200 with `{"status":"ok"}` iff the process can answer HTTP.
         No dependency checks — a failure here restarts the pod, so
@@ -80,7 +75,7 @@ paths:
   /status/ready:
     get:
       tags: [status]
-      summary: Kubelet readiness probe
+      summary: Readiness probe
       description: |
         Returns 200 iff every dep check (database, redis) passes; otherwise
         503. Runs the probes inline — there is no cached snapshot in this
