@@ -6,10 +6,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 
 	"github.com/open-xiv/memo-syncer/buildinfo"
 	"github.com/open-xiv/memo-syncer/flow"
 )
+
+// healthProbeTimeout caps one dep probe. ctx is also bound by the parent
+// (kubelet's probe timeoutSeconds cancels earlier) so this is the human-
+// triggered /status ceiling, not the kubelet path.
+const healthProbeTimeout = 5 * time.Second
 
 type Check struct {
 	OK        bool   `json:"ok"`
@@ -73,10 +79,51 @@ func StatusReady(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-func runChecks(ctx context.Context) map[string]Check {
-	return map[string]Check{
-		"database": dbCheck(ctx),
-		"redis":    redisCheck(ctx),
+// runChecks fans the dep probes out across goroutines, each with its own
+// context.WithTimeout, then collects them. a previous version shared one
+// budget across a sequential map literal — a slow DB ping over WG could
+// starve the redis check and surface as a false dual-failure that flapped
+// readiness 503s without actually being a dual outage. memo-discord-bot
+// hit this hard (335 restarts / 44h) because it stacked a self-kill on
+// top; syncer just took intermittent kubelet pull-from-service hits.
+func runChecks(parent context.Context) map[string]Check {
+	type result struct {
+		name  string
+		check Check
+	}
+	out := make(chan result, 2)
+
+	runWithCtx := func(name string, fn func(context.Context) Check) {
+		ctx, cancel := context.WithTimeout(parent, healthProbeTimeout)
+		defer cancel()
+		out <- result{name, fn(ctx)}
+	}
+
+	go runWithCtx("database", dbCheck)
+	go runWithCtx("redis", redisCheck)
+
+	checks := make(map[string]Check, 2)
+	for i := 0; i < 2; i++ {
+		r := <-out
+		checks[r.name] = r.check
+	}
+	logFailedChecks(checks)
+	return checks
+}
+
+// logFailedChecks emits a warn per failed dep so transient outages surface
+// in the log stream — previously the only signal was the /status JSON
+// payload, which nobody reads until something else goes wrong.
+func logFailedChecks(checks map[string]Check) {
+	for name, ch := range checks {
+		if ch.OK {
+			continue
+		}
+		log.Warn().
+			Str("event", "health.dep_failed").
+			Str("dep", name).
+			Str("error", ch.Error).
+			Msg("dependency check failed")
 	}
 }
 
